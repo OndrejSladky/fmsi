@@ -32,7 +32,7 @@ int ms_index(int argc, char *argv[]) {
   int c;
   int usage = 0;
   int k = 13;
-  while ((c = getopt(argc, argv, "k:")) >= 0) {
+  while ((c = getopt(argc, argv, "k:h")) >= 0) {
     switch (c) {
     case 'k':
         k = atoi(optarg);
