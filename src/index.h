@@ -22,9 +22,11 @@ inline qsint_t _convert_nucleotide(char c) {
 }
 
 qsint_t *_convert_superstring(masked_superstring_t ms) {
-  qsint_t *ret = (qsint_t*)malloc(ms.superstring.size());
-  for (size_t i = 0; i < ms.superstring.size(); ++i) {
-    ret[i] = _convert_nucleotide(ms.superstring[i]);
+    size_t size = ms.superstring.size();
+  qsint_t *ret = (qsint_t*)malloc(size * sizeof(qsint_t));
+  for (size_t i = 0; i < size; ++i) {
+    auto etwas = _convert_nucleotide(ms.superstring[i]);
+      ret[i] = etwas;
   }
   return ret;
 }
@@ -33,7 +35,7 @@ mask_t construct_bw_transformed_mask(const char *fn, int k) {
   auto ms = read_masked_superstring(fn);
   append_reverse_complement(ms, k);
   qsint_t *superstring = _convert_superstring(ms);
-  qsint_t *sa = (qsint_t*)malloc(ms.superstring.size());
+  qsint_t *sa = (qsint_t*)malloc(ms.superstring.size() * sizeof(qsint_t));
   QSufSortSuffixSort(sa, superstring, (qsint_t)ms.superstring.size(),
                      (qsint_t)ALPHABET_SIZE - 1, 0, 0);
   return bw_transform_mask(sa, ms.mask);
