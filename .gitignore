@@ -1,5 +1,6 @@
 # Compiled binaries
 ms-index
+tests/ms-index-test
 
 # Prerequisites
 *.d
