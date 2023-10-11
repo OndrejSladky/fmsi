@@ -47,8 +47,8 @@ clean:
 	# if BWA Makefile is present
 	test -f bwa/Makefile && $(MAKE) -C bwa clean
 
-$(PROG): bwa/libbwa.a $(AOBJS2) main.o
-	$(CC) $(INCLUDES) $(CFLAGS) $(DFLAGS) $(AOBJS2) main.o -o $@ -Lbwa -lbwa $(LIBS)
+$(PROG): bwa/libbwa.a $(AOBJS2)
+	$(CC) $(INCLUDES) $(CFLAGS) $(DFLAGS) $(AOBJS2) bwa/QSufSort.c main.cpp -o $@ -Lbwa -lbwa $(LIBS)
 
 #bwa/libbwa.a $(AOBJS2) bwtexk.o:
 bwa/libbwa.a:
