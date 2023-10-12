@@ -23,10 +23,10 @@ inline qsint_t _convert_nucleotide(char c) {
 
 qsint_t *_convert_superstring(masked_superstring_t ms) {
     size_t size = ms.superstring.size();
-  qsint_t *ret = (qsint_t*)malloc(size * sizeof(qsint_t));
+    // Allocate memory also for the
+  qsint_t *ret = (qsint_t*)malloc((size + 1) * sizeof(qsint_t));
   for (size_t i = 0; i < size; ++i) {
-    auto etwas = _convert_nucleotide(ms.superstring[i]);
-      ret[i] = etwas;
+      ret[i] = _convert_nucleotide(ms.superstring[i]);
   }
   return ret;
 }
@@ -34,11 +34,15 @@ qsint_t *_convert_superstring(masked_superstring_t ms) {
 mask_t construct_bw_transformed_mask(const char *fn, int k) {
   auto ms = read_masked_superstring(fn);
   append_reverse_complement(ms, k);
-  qsint_t *superstring = _convert_superstring(ms);
-  qsint_t *sa = (qsint_t*)malloc(ms.superstring.size() * sizeof(qsint_t));
-  QSufSortSuffixSort(sa, superstring, (qsint_t)ms.superstring.size(),
+  qsint_t *sa = _convert_superstring(ms);
+  // TODO: find out the required size of workspace.
+  qsint_t *workspace = (qsint_t*)malloc((ms.superstring.size()+1) * sizeof(qsint_t));
+  QSufSortSuffixSort(sa, workspace, (qsint_t)ms.superstring.size(),
                      (qsint_t)ALPHABET_SIZE - 1, 0, 0);
-  return bw_transform_mask(sa, ms.mask);
+  auto ret = bw_transform_mask(sa, ms.mask);
+  free(workspace);
+  free(sa);
+  return ret;
 }
 
 #undef ALPHABET_SIZE

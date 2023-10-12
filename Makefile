@@ -15,5 +15,5 @@ format:
 
 clean: ## Clean
 	$(MAKE) -C src clean
-	$(MAKE) -C test clean
+	$(MAKE) -C tests clean
 	rm -f ms-index

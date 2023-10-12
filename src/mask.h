@@ -11,10 +11,11 @@
 
 typedef std::vector<bool> mask_t;
 
-mask_t bw_transform_mask(const qsint_t *suffix_array, mask_t original_mask) {
-  mask_t result = mask_t(original_mask.size());
+mask_t bw_transform_mask(const qsint_t *inverse_suffix_array, mask_t original_mask) {
+  mask_t result = mask_t(original_mask.size() + 1);
   for (uint64_t i = 0; i < original_mask.size(); ++i) {
-    result[i] = original_mask[suffix_array[i]];
+    if (i) result[inverse_suffix_array[i]] = original_mask[i-1];
+    else result[inverse_suffix_array[i]] = 0;
   }
   return result;
 }

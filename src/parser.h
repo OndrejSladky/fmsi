@@ -3,12 +3,16 @@
 #include <string>
 #include "stdexcept"
 
+// TODO remove this
 #ifdef USE_MALLOC_WRAPPERS
 #undef USE_MALLOC_WRAPPERS
 #endif
+
+#include <zlib.h>
+#include <stdio.h>
 #include "kseq.h"
 #include "mask.h"
-#include "utils.h"
+
 KSEQ_INIT(gzFile, gzread)
 
 typedef struct {
@@ -34,7 +38,7 @@ masked_superstring_t read_masked_superstring(const char *fn) {
 
   int l;
   while ((l = kseq_read(seq)) >= 0) {
-    for (uint64_t i = 0; i < l; ++i) {
+    for (int i = 0; i < l; ++i) {
       char c = seq->seq.s[i];
       ret.mask.push_back(_isupper(c));
       ret.superstring.push_back(_toupper(c));
