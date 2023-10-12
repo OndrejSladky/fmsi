@@ -22,6 +22,11 @@ static int usage_index() {
   return 1;
 }
 
+static int usage_query() {
+    fprintf(stderr, "HERE WILL BE USAGE\n");
+    return 1;
+}
+
 extern "C" int bwa_fa2pac(int argc, char *argv[]);
 extern "C" int bwa_pac2bwt(int argc, char *argv[]);
 extern "C" int bwt_bwtgen_main(int argc, char *argv[]);
@@ -86,13 +91,37 @@ int ms_index(int argc, char *argv[]) {
   return 0;
 }
 
+int ms_query(int argc, char *argv[]) {
+    if (optind + 1 > argc) {
+        usage_query();
+        return 1;
+    }
+    char* fn = argv[optind];
+    char* kmer = argv[optind + 1];
+    // TODO load FM-index.
+    // TODO obtain SA coordinates or return.
+    size_t sa_coordinates = 0; //temporarily mocking FM-index
+    // TODO destroy FM-index
+    char*fnmask = (char*) malloc((strlen(fn) + 10) * sizeof (char));
+    strcpy(fnmask, fn);
+    strcat(fnmask, ".mask");
+    mask_t mask = mask_restore(fnmask);
+    if (mask[sa_coordinates]) printf("FOUND\n");
+    else printf("NOT FOUND\n");
+
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
   int ret = 0;
   if (argc < 2) {
     usage();
     return 0;
-  } else if (strcmp(argv[1], "index") == 0)
+  }
+  if (strcmp(argv[1], "index") == 0)
     ret = ms_index(argc - 1, argv + 1);
+  else if (strcmp(argv[1], "query") == 0)
+      ret = ms_query(argc - 1, argv + 1);
   else
     return usage();
 
