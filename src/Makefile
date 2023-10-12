@@ -26,6 +26,10 @@ AOBJS2=	\
 			bwa/fastmap.o \
 			bwa/bwtsw2_pair.o \
 			bwa/QSufSort.o \
+			bwa/bwa.o \
+			bwa/bwt.o \
+			bwa/bwtindex.o \
+			bwa/bntseq.o \
 
 
 INCLUDES=	-Ibwa

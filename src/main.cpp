@@ -22,11 +22,11 @@ static int usage_index() {
   return 1;
 }
 
-int bwa_fa2pac(int argc, char *argv[]);
-int bwa_pac2bwt(int argc, char *argv[]);
-int bwt_bwtgen_main(int argc, char *argv[]);
-int bwa_bwtupdate(int argc, char *argv[]);
-int bwa_bwt2sa(int argc, char *argv[]);
+extern "C" int bwa_fa2pac(int argc, char *argv[]);
+extern "C" int bwa_pac2bwt(int argc, char *argv[]);
+extern "C" int bwt_bwtgen_main(int argc, char *argv[]);
+extern "C" int bwa_bwtupdate(int argc, char *argv[]);
+extern "C" int bwa_bwt2sa(int argc, char *argv[]);
 
 int ms_index(int argc, char *argv[]) {
   int c;
@@ -61,7 +61,6 @@ int ms_index(int argc, char *argv[]) {
   arguments[0] = (char*)malloc(10 * sizeof(char));
   arguments[1] = (char*)malloc((strlen(prefix) + 10) * sizeof(char));
   arguments[2] = (char*)malloc((strlen(prefix) + 10) * sizeof(char));
-  /*
   strcpy(arguments[0], "fa2pac");
   strcpy(arguments[1], prefix);
   strcpy(arguments[2], prefix);
@@ -76,7 +75,7 @@ int ms_index(int argc, char *argv[]) {
   strcpy(arguments[1], prefix);
   strcat(arguments[1], ".bwt");
   optind = 1;
-  bwa_bwtupdate(2, arguments);*/
+  bwa_bwtupdate(2, arguments);
 
   // Construct and dump the BW-transformed mask.
   mask_t bwTransformedMask = construct_bw_transformed_mask(prefix, k);
