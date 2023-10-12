@@ -81,7 +81,7 @@ int ms_index(int argc, char *argv[]) {
   mask_t bwTransformedMask = construct_bw_transformed_mask(prefix, k);
   strcpy(arguments[0], prefix);
   strcat(arguments[0], ".mask");
-  // mask_dump(arguments[0], bwTransformedMask);
+  mask_dump(arguments[0], bwTransformedMask);
   free(prefix);
   return 0;
 }

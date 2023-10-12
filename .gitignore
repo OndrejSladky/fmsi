@@ -1,3 +1,10 @@
+# BW files
+*.ann
+*.amb
+*.bwt
+*.mask
+*.pac
+
 # Compiled binaries
 ms-index
 tests/ms-index-test
