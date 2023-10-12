@@ -1,17 +1,17 @@
 #pragma once
 
-#include <string>
 #include "stdexcept"
+#include <string>
 
 // TODO remove this
 #ifdef USE_MALLOC_WRAPPERS
 #undef USE_MALLOC_WRAPPERS
 #endif
 
-#include <zlib.h>
-#include <stdio.h>
 #include "kseq.h"
 #include "mask.h"
+#include <stdio.h>
+#include <zlib.h>
 
 KSEQ_INIT(gzFile, gzread)
 

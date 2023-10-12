@@ -6,11 +6,11 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "index.h"
 #include "bwa.h"
+#include "index.h"
 #include "mask.h"
 
-//#include "bwt_gen.c"
+// #include "bwt_gen.c"
 
 static int usage() {
   fprintf(stderr, "HERE WILL BE USAGE\n");
@@ -35,7 +35,7 @@ int ms_index(int argc, char *argv[]) {
   while ((c = getopt(argc, argv, "k:h")) >= 0) {
     switch (c) {
     case 'k':
-        k = atoi(optarg);
+      k = atoi(optarg);
       break;
     case 'h':
       usage = 1;
@@ -53,14 +53,14 @@ int ms_index(int argc, char *argv[]) {
     usage_index();
     return 1;
   }
-  char *prefix = (char*)malloc(strlen(argv[optind]) * sizeof(char));
+  char *prefix = (char *)malloc(strlen(argv[optind]) * sizeof(char));
   strcpy(prefix, argv[optind]);
 
   // Construct and dump the FM-index.
   char *arguments[3];
-  arguments[0] = (char*)malloc(10 * sizeof(char));
-  arguments[1] = (char*)malloc((strlen(prefix) + 10) * sizeof(char));
-  arguments[2] = (char*)malloc((strlen(prefix) + 10) * sizeof(char));
+  arguments[0] = (char *)malloc(10 * sizeof(char));
+  arguments[1] = (char *)malloc((strlen(prefix) + 10) * sizeof(char));
+  arguments[2] = (char *)malloc((strlen(prefix) + 10) * sizeof(char));
   strcpy(arguments[0], "fa2pac");
   strcpy(arguments[1], prefix);
   strcpy(arguments[2], prefix);
@@ -81,7 +81,7 @@ int ms_index(int argc, char *argv[]) {
   mask_t bwTransformedMask = construct_bw_transformed_mask(prefix, k);
   strcpy(arguments[0], prefix);
   strcat(arguments[0], ".mask");
-  //mask_dump(arguments[0], bwTransformedMask);
+  // mask_dump(arguments[0], bwTransformedMask);
   free(prefix);
   return 0;
 }

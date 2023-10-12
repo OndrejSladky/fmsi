@@ -11,7 +11,7 @@ test:
 	$(MAKE) -C tests
 
 format:
-	clang-format -verbose -i src/*.h src/*.cpp
+	clang-format -verbose -i src/mask.h src/index.h src/parser.h src/*.cpp tests/*.h tests/*.cpp
 
 clean: ## Clean
 	$(MAKE) -C src clean
