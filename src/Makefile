@@ -52,7 +52,7 @@ clean:
 	test -f bwa/Makefile && $(MAKE) -C bwa clean
 
 $(PROG): bwa/libbwa.a $(AOBJS2) bwa/QSufSort.c $(wildcard *.cpp *.h)
-	$(CC) $(INCLUDES) $(CFLAGS) $(DFLAGS) $(AOBJS2) bwa/QSufSort.c main.cpp -o $@ -Lbwa -lbwa $(LIBS)
+	$(CC) $(INCLUDES) $(CFLAGS) $(DFLAGS) $(AOBJS2) bwa/QSufSort.c main.cpp -o $@ -Lbwa -lbwa $(LIBS) -I/usr/local/include -L/usr/local/lib -lsdsl -ldivsufsort -ldivsufsort64 
 
 #bwa/libbwa.a $(AOBJS2) bwtexk.o:
 bwa/libbwa.a:

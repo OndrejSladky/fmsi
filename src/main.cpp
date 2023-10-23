@@ -5,12 +5,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sdsl/suffix_arrays.hpp>
 
-#include "bwa.h"
+
 #include "index.h"
 #include "mask.h"
 
-// #include "bwt_gen.c"
 
 static int usage() {
   fprintf(stderr, "HERE WILL BE USAGE\n");
@@ -58,36 +58,17 @@ int ms_index(int argc, char *argv[]) {
     usage_index();
     return 1;
   }
-  char *prefix = (char *)malloc(strlen(argv[optind]) * sizeof(char));
-  strcpy(prefix, argv[optind]);
-
+  std::string fn = std::string(argv[optind]);
+  std::string mask_path = fn + ".mask";
+  std::string index_path = fn + ".fm9";
   // Construct and dump the FM-index.
-  char *arguments[3];
-  arguments[0] = (char *)malloc(10 * sizeof(char));
-  arguments[1] = (char *)malloc((strlen(prefix) + 10) * sizeof(char));
-  arguments[2] = (char *)malloc((strlen(prefix) + 10) * sizeof(char));
-  strcpy(arguments[0], "fa2pac");
-  strcpy(arguments[1], prefix);
-  strcpy(arguments[2], prefix);
-  optind = 1;
-  bwa_fa2pac(3, arguments);
-  strcpy(arguments[0], "pac2bwt");
-  strcat(arguments[1], ".pac");
-  strcat(arguments[2], ".bwt");
-  optind = 1;
-  bwt_bwtgen_main(3, arguments);
-  strcpy(arguments[0], "bwtupdate");
-  strcpy(arguments[1], prefix);
-  strcat(arguments[1], ".bwt");
-  optind = 1;
-  bwa_bwtupdate(2, arguments);
-
+  // TODO: find out what the constants mean.
+  sdsl::csa_wt<sdsl::wt_huff<sdsl::rrr_vector<127>>, 512, 1024> fm_index;
+  sdsl::construct(fm_index, fn, 1);
+  sdsl::store_to_file(fm_index, index_path);
   // Construct and dump the BW-transformed mask.
-  mask_t bwTransformedMask = construct_bw_transformed_mask(prefix, k);
-  strcpy(arguments[0], prefix);
-  strcat(arguments[0], ".mask");
-  mask_dump(arguments[0], bwTransformedMask);
-  free(prefix);
+  mask_t bw_transformed_mask = construct_bw_transformed_mask(fn.c_str(), k);
+  mask_dump(mask_path.c_str(), bw_transformed_mask);
   return 0;
 }
 
@@ -96,19 +77,25 @@ int ms_query(int argc, char *argv[]) {
         usage_query();
         return 1;
     }
-    char* fn = argv[optind];
-    char* kmer = argv[optind + 1];
-    // TODO load FM-index.
-    // TODO obtain SA coordinates or return.
-    size_t sa_coordinates = 0; //temporarily mocking FM-index
-    // TODO destroy FM-index
-    char*fnmask = (char*) malloc((strlen(fn) + 10) * sizeof (char));
-    strcpy(fnmask, fn);
-    strcat(fnmask, ".mask");
-    mask_t mask = mask_restore(fnmask);
-    if (mask[sa_coordinates]) printf("FOUND\n");
+    std::string fn = argv[optind];
+    std::string mask_path = fn + ".mask";
+    std::string index_path = fn + ".fm9";
+    std::string kmer = argv[optind + 1];
+    // Load FM-index.
+    sdsl::csa_wt<sdsl::wt_huff<sdsl::rrr_vector<127>>, 512, 1024> fm_index;
+    sdsl::load_from_file(fm_index, index_path);
+    // Load mask.
+    mask_t mask = mask_restore(mask_path.c_str());
+    // Find the SA coordinates of the occurrences range.
+    size_t from, to;
+    auto count = sdsl::backward_search(fm_index, 0, fm_index.size() - 1, kmer.begin(), kmer.end(), from, to);
+    bool found = false;
+    if (count) {
+        // Check if it is a represented k-mer.
+        found = mask[from];
+    }
+    if (found) printf("FOUND\n");
     else printf("NOT FOUND\n");
-
     return 0;
 }
 
