@@ -8,6 +8,9 @@
 #include "mask.h"
 #include "parser.h"
 
+// TODO: find out what the constants mean.
+typedef sdsl::csa_wt<sdsl::wt_huff<sdsl::rrr_vector<127>>, 512, 1024> fm_index_t;
+
 static int usage() {
   fprintf(stderr, "HERE WILL BE USAGE\n");
   return 1;
@@ -58,8 +61,7 @@ int ms_index(int argc, char *argv[]) {
   mask_t bw_transformed_mask = construct_bw_transformed_mask(ms);
   mask_dump(mask_path, bw_transformed_mask);
   // Construct and dump the FM-index.
-  // TODO: find out what the constants mean.
-  sdsl::csa_wt<sdsl::wt_huff<sdsl::rrr_vector<127>>, 512, 1024> fm_index;
+  fm_index_t fm_index;
   sdsl::construct(fm_index, superstring_path, 1);
   sdsl::store_to_file(fm_index, index_path);
   return 0;
@@ -75,14 +77,14 @@ int ms_query(int argc, char *argv[]) {
   std::string index_path = fn + ".fm9";
   std::string kmer = argv[optind + 1];
   // Load FM-index.
-  sdsl::csa_wt<sdsl::wt_huff<sdsl::rrr_vector<127>>, 512, 1024> fm_index;
+  fm_index_t fm_index;
   sdsl::load_from_file(fm_index, index_path);
   // Load mask.
   mask_t mask = mask_restore(mask_path);
   // Find the SA coordinates of the occurrences range of the k-mer and its RC.
   bool found = false;
   auto rc = reverse_complement(kmer);
-  size_t from, to;
+  fm_index_t::size_type from, to;
   auto count = sdsl::backward_search(fm_index, 0, fm_index.size() - 1,
                                      kmer.begin(), kmer.end(), from, to);
   if (count) {
