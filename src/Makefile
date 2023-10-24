@@ -7,7 +7,7 @@ INCLUDES-CI-LINUX=		-I/home/runner/include -L/home/runner/lib
 INCLUDES-CI-MACOS=		-I/Users/runner/include -L/Users/runner/lib
 LIBS=									-lz -lsdsl -ldivsufsort -ldivsufsort64
 
-all:$(PROG) ./include/sdsl/suffix_arrays.hpp
+all:$(PROG)
 
 all-ci-linux:
 	$(CXX) $(INCLUDES-CI-LINUX) $(CXXFLAGS)  QSufSort.c main.cpp -o $@ $(LIBS)
