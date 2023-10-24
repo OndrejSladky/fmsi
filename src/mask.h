@@ -17,10 +17,7 @@ mask_t bw_transform_mask(const qsint_t *inverse_suffix_array,
                          mask_t original_mask) {
   mask_t result = mask_t(original_mask.size() + 1);
   for (uint64_t i = 0; i < original_mask.size(); ++i) {
-    if (i)
-      result[inverse_suffix_array[i]] = original_mask[i - 1];
-    else
-      result[inverse_suffix_array[i]] = 0;
+      result[inverse_suffix_array[i]] = original_mask[i];
   }
   return result;
 }

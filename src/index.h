@@ -31,9 +31,7 @@ qsint_t *_convert_superstring(masked_superstring_t ms) {
   return ret;
 }
 
-mask_t construct_bw_transformed_mask(const char *fn, int k) {
-  auto ms = read_masked_superstring(fn);
-  append_reverse_complement(ms, k);
+mask_t construct_bw_transformed_mask(masked_superstring_t ms, int k) {
   qsint_t *sa = _convert_superstring(ms);
   // TODO: find out the required size of workspace.
   qsint_t *workspace =

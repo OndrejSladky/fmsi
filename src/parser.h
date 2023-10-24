@@ -64,10 +64,26 @@ inline char _complement(char c) {
   }
 }
 
+
+std::string reverse_complement(std::string s) {
+    std::string res;
+    for (size_t i = 0; i < s.size(); ++i) {
+        res.push_back(_complement(s[s.size() - 1 - i]));
+    }
+    return res;
+}
+
 void append_reverse_complement(masked_superstring_t &ms, int k) {
   size_t length = ms.superstring.size();
   for (size_t i = 0; i < length; ++i) {
     ms.superstring.push_back(_complement(ms.superstring[length - 1 - i]));
     ms.mask.push_back(ms.mask[length - k - i]);
   }
+}
+
+void write_superstring(std::string fn, std::string superstring) {
+    std::ofstream of;
+    of.open(fn, std::ios::out);
+    of.write(superstring.c_str(), superstring.size());
+    of.close();
 }

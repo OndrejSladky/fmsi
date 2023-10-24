@@ -1,9 +1,7 @@
 # BW files
-*.ann
-*.amb
-*.bwt
 *.mask
-*.pac
+*.sstr
+*.fm9
 
 # Compiled binaries
 ms-index

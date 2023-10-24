@@ -10,6 +10,7 @@
 
 #include "index.h"
 #include "mask.h"
+#include "parser.h"
 
 
 static int usage() {
@@ -59,16 +60,22 @@ int ms_index(int argc, char *argv[]) {
     return 1;
   }
   std::string fn = std::string(argv[optind]);
+  std::string superstring_path = fn + ".sstr";
   std::string mask_path = fn + ".mask";
   std::string index_path = fn + ".fm9";
+    auto ms = read_masked_superstring(fn.c_str());
+    //append_reverse_complement(ms, k);
+
+    write_superstring(superstring_path, ms.superstring);
+
+    // Construct and dump the BW-transformed mask.
+    mask_t bw_transformed_mask = construct_bw_transformed_mask(ms, k);
+    mask_dump(mask_path.c_str(), bw_transformed_mask);
   // Construct and dump the FM-index.
   // TODO: find out what the constants mean.
   sdsl::csa_wt<sdsl::wt_huff<sdsl::rrr_vector<127>>, 512, 1024> fm_index;
-  sdsl::construct(fm_index, fn, 1);
+  sdsl::construct(fm_index, superstring_path, 1);
   sdsl::store_to_file(fm_index, index_path);
-  // Construct and dump the BW-transformed mask.
-  mask_t bw_transformed_mask = construct_bw_transformed_mask(fn.c_str(), k);
-  mask_dump(mask_path.c_str(), bw_transformed_mask);
   return 0;
 }
 
@@ -86,13 +93,18 @@ int ms_query(int argc, char *argv[]) {
     sdsl::load_from_file(fm_index, index_path);
     // Load mask.
     mask_t mask = mask_restore(mask_path.c_str());
-    // Find the SA coordinates of the occurrences range.
+    // Find the SA coordinates of the occurrences range of the k-mer and its RC.
+    bool found = false;
+    auto rc = reverse_complement(kmer);
     size_t from, to;
     auto count = sdsl::backward_search(fm_index, 0, fm_index.size() - 1, kmer.begin(), kmer.end(), from, to);
-    bool found = false;
+    // Check if it is a represented k-mer.
     if (count) {
-        // Check if it is a represented k-mer.
         found = mask[from];
+    }
+    auto count_rc = sdsl::backward_search(fm_index, 0, fm_index.size() - 1, rc.begin(), rc.end(), from, to);
+    if (count_rc) {
+        found |= mask[from];
     }
     if (found) printf("FOUND\n");
     else printf("NOT FOUND\n");
