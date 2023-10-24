@@ -13,7 +13,7 @@ all-ci-linux:
 	$(CC) $(INCLUDES-CI-LINUX) $(CFLAGS)  QSufSort.c main.cpp -o $@ $(LIBS) 
 	
 all-ci-macos:
-	$(CC) $(INCLUDES-CI-macos) $(CFLAGS)  QSufSort.c main.cpp -o $@ $(LIBS) 
+	$(CC) $(INCLUDES-CI-MACOS) $(CFLAGS)  QSufSort.c main.cpp -o $@ $(LIBS) 
 
 clean:
 	rm -f $(PROG)	
