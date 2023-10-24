@@ -12,7 +12,7 @@ all: test
 test: ms-index-test
 	./ms-index-test
 
-ms-index-test: $(wildcard *.cpp *.h *.hpp) gtest-all.o $(SRC)/$(wildcard *.cpp *.h *.hpp) $(QSSDir)/QSufSort.c
+ms-index-test: $(wildcard *.cpp *.h *.hpp) gtest-all.o $(SRC)/$(wildcard *.cpp *.h *.hpp) $(SRC)/QSufSort.c
 	$(CXX) $(CXXFLAGS) -isystem $(GTEST)/include -I $(GTEST)/include main.cpp $(SRC)/QSufSort.c gtest-all.o -pthread -o $@ $(LDFLAGS)
 
 gtest-all.o: $(GTEST)/src/gtest-all.cc

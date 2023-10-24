@@ -4,8 +4,9 @@
 #include "mask.h"
 #include "parser.h"
 
-#define ALPHABET_SIZE 4
+constexpr int ALPHABET_SIZE = 4;
 
+/// Return the integer representation of the nucleotide.
 inline qsint_t _convert_nucleotide(char c) {
   switch (c) {
   case 'A':
@@ -21,6 +22,8 @@ inline qsint_t _convert_nucleotide(char c) {
   }
 }
 
+/// Return the integer representation of the given superstring to be used in
+/// suffix sort.
 qsint_t *_convert_superstring(masked_superstring_t ms) {
   size_t size = ms.superstring.size();
   // Allocate memory also for the
@@ -31,7 +34,8 @@ qsint_t *_convert_superstring(masked_superstring_t ms) {
   return ret;
 }
 
-mask_t construct_bw_transformed_mask(masked_superstring_t ms, int k) {
+/// Return the mask indexed in the suffix array coordinates.
+mask_t construct_bw_transformed_mask(masked_superstring_t ms) {
   qsint_t *sa = _convert_superstring(ms);
   // TODO: find out the required size of workspace.
   qsint_t *workspace =
@@ -43,5 +47,3 @@ mask_t construct_bw_transformed_mask(masked_superstring_t ms, int k) {
   free(sa);
   return ret;
 }
-
-#undef ALPHABET_SIZE

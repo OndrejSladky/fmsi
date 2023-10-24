@@ -10,6 +10,6 @@ all:$(PROG)
 clean:
 	rm -f $(PROG)	
 
-$(PROG): $(wildcard *.cpp *.h)
+$(PROG): $(wildcard *.cpp *.c *.h)
 	$(CC) $(INCLUDES) $(CFLAGS) $(DFLAGS) $(AOBJS2) QSufSort.c main.cpp -o $@ $(LIBS) 
 

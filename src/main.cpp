@@ -23,12 +23,6 @@ static int usage_query() {
   return 1;
 }
 
-extern "C" int bwa_fa2pac(int argc, char *argv[]);
-extern "C" int bwa_pac2bwt(int argc, char *argv[]);
-extern "C" int bwt_bwtgen_main(int argc, char *argv[]);
-extern "C" int bwa_bwtupdate(int argc, char *argv[]);
-extern "C" int bwa_bwt2sa(int argc, char *argv[]);
-
 int ms_index(int argc, char *argv[]) {
   int c;
   int usage = 0;
@@ -58,11 +52,11 @@ int ms_index(int argc, char *argv[]) {
   std::string superstring_path = fn + ".sstr";
   std::string mask_path = fn + ".mask";
   std::string index_path = fn + ".fm9";
-  auto ms = read_masked_superstring(fn.c_str());
+  auto ms = read_masked_superstring(fn);
   write_superstring(superstring_path, ms.superstring);
   // Construct and dump the BW-transformed mask.
-  mask_t bw_transformed_mask = construct_bw_transformed_mask(ms, k);
-  mask_dump(mask_path.c_str(), bw_transformed_mask);
+  mask_t bw_transformed_mask = construct_bw_transformed_mask(ms);
+  mask_dump(mask_path, bw_transformed_mask);
   // Construct and dump the FM-index.
   // TODO: find out what the constants mean.
   sdsl::csa_wt<sdsl::wt_huff<sdsl::rrr_vector<127>>, 512, 1024> fm_index;
@@ -84,14 +78,13 @@ int ms_query(int argc, char *argv[]) {
   sdsl::csa_wt<sdsl::wt_huff<sdsl::rrr_vector<127>>, 512, 1024> fm_index;
   sdsl::load_from_file(fm_index, index_path);
   // Load mask.
-  mask_t mask = mask_restore(mask_path.c_str());
+  mask_t mask = mask_restore(mask_path);
   // Find the SA coordinates of the occurrences range of the k-mer and its RC.
   bool found = false;
   auto rc = reverse_complement(kmer);
   size_t from, to;
   auto count = sdsl::backward_search(fm_index, 0, fm_index.size() - 1,
                                      kmer.begin(), kmer.end(), from, to);
-  // Check if it is a represented k-mer.
   if (count) {
     found = mask[from];
   }
@@ -100,6 +93,7 @@ int ms_query(int argc, char *argv[]) {
   if (count_rc) {
     found |= mask[from];
   }
+
   if (found)
     printf("FOUND\n");
   else

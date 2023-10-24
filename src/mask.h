@@ -1,9 +1,3 @@
-/*
-  BW-transformed representation of mask.
-  Author: Ondřej Sladký <ondra.sladky@gmail.com>
-  Licence: MIT
-*/
-
 #pragma once
 
 #include "QSufSort.h"
@@ -13,6 +7,7 @@
 
 typedef std::vector<bool> mask_t;
 
+/// Compute the mask in suffix array coordinates.
 mask_t bw_transform_mask(const qsint_t *inverse_suffix_array,
                          mask_t original_mask) {
   mask_t result = mask_t(original_mask.size() + 1);
@@ -22,7 +17,7 @@ mask_t bw_transform_mask(const qsint_t *inverse_suffix_array,
   return result;
 }
 
-void mask_dump(const char *fn, mask_t mask) {
+void mask_dump(std::string fn, mask_t mask) {
   // TODO make this more efficient.
   std::ofstream of;
   of.open(fn, std::ios::binary | std::ios::out);
@@ -36,7 +31,7 @@ void mask_dump(const char *fn, mask_t mask) {
   of.close();
 }
 
-mask_t mask_restore(const char *fn) {
+mask_t mask_restore(std::string fn) {
   // TODO make this more efficient.
   std::ifstream f;
   f.open(fn, std::ios::binary | std::ios::in);

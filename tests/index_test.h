@@ -9,18 +9,16 @@
 namespace {
 TEST(INDEX, INDEX) {
   struct test_case {
-    std::string fn;
-    int k;
+    masked_superstring_t ms;
     mask_t want_result;
   };
   std::vector<test_case> tests = {
-      // The input corresponds to MS CAcCtAgGTg$
-      // Its BWT is gCt$AcTAgCG
-      // And the corresponding mask is 01001011011
-      {"testfiles/mask_test.fa", 2, {0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1}}};
+      // The input corresponds to mask 11010101100 (MS=CAcCtAgGTg$).
+      {{{1, 1, 0, 1, 0, 1, 0, 1, 1, 0}, "CACCTAGGTG"},
+       {0, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1}}};
 
   for (auto t : tests) {
-    auto got_result = construct_bw_transformed_mask(t.fn.c_str(), t.k);
+    auto got_result = construct_bw_transformed_mask(t.ms);
 
     EXPECT_EQ(t.want_result, got_result);
   }
