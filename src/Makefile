@@ -2,7 +2,7 @@
 CC=					g++
 CFLAGS=			-g -Wall -Wno-unused-function -g3
 PROG=				../ms-index
-INCLUDES=		-I/usr/local/include -L/usr/local/lib
+INCLUDES=		-I~/include -L~/lib
 LIBS=				-lz -lsdsl -ldivsufsort -ldivsufsort64
 
 all:$(PROG)
