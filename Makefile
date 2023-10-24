@@ -1,4 +1,4 @@
-.PHONY: all help clean test clang-format
+.PHONY: all help clean test clang-format all-ci-linux all-ci-macos
 
 DEPS= $(wildcard src/*.h) $(wildcard src/*.cpp) $(wildcard src/bwa/.*.h) $(wildcard src/bwa/*.c)
 
@@ -9,6 +9,12 @@ ms-index: $(DEPS)
 
 test:
 	$(MAKE) -C tests
+
+all-ci-linux:
+	$(MAKE) -C src all-ci-linux
+
+all-ci-macos:
+	$(MAKE) -C src all-ci-macos
 
 format:
 	clang-format -verbose -i src/*.h src/*.cpp tests/*.h tests/*.cpp
