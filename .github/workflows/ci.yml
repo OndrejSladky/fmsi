@@ -7,13 +7,9 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build_with_unittests:
+  build_with_unittests_linux:
 
-    runs-on: ${{ matrix.os }}
-    
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+    runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v3
@@ -22,6 +18,21 @@ jobs:
     - name: install-sdsl
       run: ./src/sdsl-lite/install.sh ~
     - name: make
-      run: make
+      run: make all-ci-linux
+    - name: tests
+      run: make test
+
+  build_with_unittests_macos:
+
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: submodule
+      run: git submodule init; git submodule update
+    - name: install-sdsl
+      run: ./src/sdsl-lite/install.sh ~
+    - name: make
+      run: make all-ci-macos
     - name: tests
       run: make test
