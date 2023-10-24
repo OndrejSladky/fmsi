@@ -20,7 +20,7 @@ jobs:
     - name: submodule
       run: git submodule init; git submodule update
     - name: install-sdsl
-      run: ./src/sdsl-lite/install.sh
+      run: ./src/sdsl-lite/install.sh ~
     - name: make
       run: make
     - name: tests
