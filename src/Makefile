@@ -24,6 +24,8 @@ sdsl-lite/build/Makefile:
 
 clean:
 	rm -f $(PROG)
+	$(MAKE) -C sdsl-lite/build/ clean
+
 
 $(PROG): $(wildcard *.cpp *.c *.h) ./include/sdsl/suffix_arrays.hpp
 	$(CXX) $(INCLUDES) $(CXXFLAGS) QSufSort.c main.cpp -o $@ $(LIBS)
