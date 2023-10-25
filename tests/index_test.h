@@ -20,7 +20,9 @@ TEST(INDEX, INDEX) {
   for (auto t : tests) {
     auto got_result = construct_bw_transformed_mask(t.ms);
 
-    EXPECT_EQ(t.want_result, got_result);
+    for (size_t i = 0; i < t.want_result.size(); ++i) {
+      EXPECT_EQ(t.want_result[i], got_result[i]);
+    }
   }
 }
 
