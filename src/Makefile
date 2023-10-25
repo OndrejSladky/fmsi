@@ -1,19 +1,12 @@
-.PHONY: all clean all-ci-linux all-ci-macos
+.PHONY: all clean 
 CXX=									g++
 CXXFLAGS=							-g -Wall -Wno-unused-function -std=c++17 -O2
 PROG=									../ms-index
-INCLUDES=							-I~/include -L~/lib
-INCLUDES-CI-LINUX=		-I/home/runner/include -L/home/runner/lib
-INCLUDES-CI-MACOS=		-I/Users/runner/include -L/Users/runner/lib
+INCLUDES-PATH?=~
+INCLUDES=							-I$(INCLUDES-PATH)/include -L$(INCLUDES-PATH)/lib
 LIBS=									-lz -lsdsl -ldivsufsort -ldivsufsort64
 
 all:$(PROG)
-
-all-ci-linux:
-	$(CXX) $(INCLUDES-CI-LINUX) $(CXXFLAGS)  QSufSort.c main.cpp -o $@ $(LIBS) 
-	
-all-ci-macos:
-	$(CXX) $(INCLUDES-CI-MACOS) $(CXXFLAGS)  QSufSort.c main.cpp -o $@ $(LIBS) 
 
 clean:
 	rm -f $(PROG)	
