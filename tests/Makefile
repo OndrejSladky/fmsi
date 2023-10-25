@@ -2,7 +2,7 @@
 
 CXX = g++
 CXXFLAGS= -g -Wall -Wno-unused-function -std=c++17 -O2 -g3
-INCLUDES-PATH?=~
+INCLUDES-PATH?=../src
 INCLUDES=							-I$(INCLUDES-PATH)/include -L$(INCLUDES-PATH)/lib
 LIBS=									-lz -lsdsl -ldivsufsort -ldivsufsort64
 GTEST= googletest/googletest

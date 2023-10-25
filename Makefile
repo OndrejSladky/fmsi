@@ -8,6 +8,7 @@ ms-index: $(DEPS)
 	$(MAKE) -C src
 
 test:
+	$(MAKE) -C src
 	$(MAKE) -C tests
 
 all-ci-linux:
