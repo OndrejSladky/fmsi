@@ -20,7 +20,7 @@ jobs:
     - name: make
       run: make all-ci-linux
     - name: tests
-      run: make test
+      run: make test-ci-linux
 
   build_with_unittests_macos:
 
@@ -35,4 +35,4 @@ jobs:
     - name: make
       run: make all-ci-macos
     - name: tests
-      run: make test
+      run: make test-ci-macos
