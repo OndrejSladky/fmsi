@@ -7,6 +7,7 @@
 #include "index.h"
 #include "mask.h"
 #include "parser.h"
+#include "version.h"
 
 // TODO: find out what the constants mean.
 typedef sdsl::csa_wt<sdsl::wt_huff<sdsl::rrr_vector<127>>, 512, 1024>
@@ -25,6 +26,11 @@ static int usage_index() {
 static int usage_query() {
   fprintf(stderr, "HERE WILL BE USAGE\n");
   return 1;
+}
+
+static int version() {
+    std::cout << VERSION << std::endl;
+    return 0;
 }
 
 int ms_index(int argc, char *argv[]) {
@@ -69,7 +75,7 @@ int ms_index(int argc, char *argv[]) {
 }
 
 int ms_query(int argc, char *argv[]) {
-  if (optind + 1 > argc) {
+  if (optind + 2 > argc) {
     usage_query();
     return 1;
   }
@@ -98,9 +104,9 @@ int ms_query(int argc, char *argv[]) {
   }
 
   if (found)
-    printf("FOUND\n");
+    std::cout << "FOUND" << std::endl;
   else
-    printf("NOT FOUND\n");
+    std::cout << "NOT FOUND\n" << std::endl;
   return 0;
 }
 
@@ -114,6 +120,8 @@ int main(int argc, char *argv[]) {
     ret = ms_index(argc - 1, argv + 1);
   else if (strcmp(argv[1], "query") == 0)
     ret = ms_query(argc - 1, argv + 1);
+  else if (strcmp(argv[1], "-v") == 0)
+      return version();
   else
     return usage();
 

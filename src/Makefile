@@ -18,9 +18,13 @@ sdsl-lite/build/Makefile:
 
 clean:
 	rm -f $(PROG)
+	rm -f version.h
 	$(MAKE) -C sdsl-lite/build/ clean
 
 
-$(PROG): $(wildcard *.cpp *.c *.h) ./include/sdsl/suffix_arrays.hpp
+$(PROG): $(wildcard *.cpp *.c *.h) ./include/sdsl/suffix_arrays.hpp version.h
 	$(CXX) $(INCLUDES) $(CXXFLAGS) QSufSort.c main.cpp -o $@ $(LIBS)
+
+version.h: version
+	./create-version.sh
 

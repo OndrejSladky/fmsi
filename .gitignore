@@ -1,5 +1,7 @@
 ms-index.dSYM/
 
+src/version.h
+
 
 # BW files
 *.mask

@@ -21,6 +21,7 @@ The recognized commands are:
 
 - `index` Creates a BWT based index of the given masked superstring.
 - `query` Queries a $k$-mer against an index.
+- `-v`    Prints the version of the program.
 
 ### Index
 
