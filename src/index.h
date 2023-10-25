@@ -35,7 +35,7 @@ qsint_t *_convert_superstring(masked_superstring_t ms) {
 }
 
 /// Return the mask indexed in the suffix array coordinates.
-mask_t construct_bw_transformed_mask(masked_superstring_t ms) {
+bw_mask_t construct_bw_transformed_mask(masked_superstring_t ms) {
   qsint_t *sa = _convert_superstring(ms);
   // TODO: find out the required size of workspace.
   qsint_t *workspace =

@@ -9,7 +9,8 @@
 #include "parser.h"
 
 // TODO: find out what the constants mean.
-typedef sdsl::csa_wt<sdsl::wt_huff<sdsl::rrr_vector<127>>, 512, 1024> fm_index_t;
+typedef sdsl::csa_wt<sdsl::wt_huff<sdsl::rrr_vector<127>>, 512, 1024>
+    fm_index_t;
 
 static int usage() {
   fprintf(stderr, "HERE WILL BE USAGE\n");
@@ -58,7 +59,7 @@ int ms_index(int argc, char *argv[]) {
   auto ms = read_masked_superstring(fn);
   write_superstring(superstring_path, ms.superstring);
   // Construct and dump the BW-transformed mask.
-  mask_t bw_transformed_mask = construct_bw_transformed_mask(ms);
+  bw_mask_t bw_transformed_mask = construct_bw_transformed_mask(ms);
   mask_dump(mask_path, bw_transformed_mask);
   // Construct and dump the FM-index.
   fm_index_t fm_index;
@@ -80,7 +81,7 @@ int ms_query(int argc, char *argv[]) {
   fm_index_t fm_index;
   sdsl::load_from_file(fm_index, index_path);
   // Load mask.
-  mask_t mask = mask_restore(mask_path);
+  bw_mask_t mask = mask_restore(mask_path);
   // Find the SA coordinates of the occurrences range of the k-mer and its RC.
   bool found = false;
   auto rc = reverse_complement(kmer);
