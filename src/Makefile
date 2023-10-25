@@ -2,15 +2,25 @@
 CXX=									g++
 CXXFLAGS=							-g -Wall -Wno-unused-function -std=c++17 -O2
 PROG=									../ms-index
-INCLUDES-PATH?=~
+INCLUDES-PATH?=.
 INCLUDES=							-I$(INCLUDES-PATH)/include -L$(INCLUDES-PATH)/lib
 LIBS=									-lz -lsdsl -ldivsufsort -ldivsufsort64
 
 all:$(PROG)
 
-clean:
-	rm -f $(PROG)	
 
-$(PROG): $(wildcard *.cpp *.c *.h)
-	$(CXX) $(INCLUDES) $(CXXFLAGS) QSufSort.c main.cpp -o $@ $(LIBS) 
+include/sdsl/suffix_arrays.hpp: sdsl-lite/build/Makefile
+	$(MAKE) -C sdsl-lite/build
+	$(MAKE) -C sdsl-lite/build install
+
+sdsl-lite/build/Makefile:
+	cd sdsl-lite/build && cmake -DCMAKE_VERBOSE_MAKEFILE=ON -DCMAKE_INSTALL_PREFIX=../.. ..
+
+clean:
+	rm -f $(PROG)
+	$(MAKE) -C sdsl-lite/build/ clean
+
+
+$(PROG): $(wildcard *.cpp *.c *.h) ./include/sdsl/suffix_arrays.hpp
+	$(CXX) $(INCLUDES) $(CXXFLAGS) QSufSort.c main.cpp -o $@ $(LIBS)
 
