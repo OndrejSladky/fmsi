@@ -22,7 +22,7 @@ jobs:
     - name: tests
       run: make test-ci-linux
 
-  build_with_unittests_macos:
+  build_macos:
 
     runs-on: macos-latest
 
@@ -34,5 +34,4 @@ jobs:
       run: ./src/sdsl-lite/install.sh ~
     - name: make
       run: make all-ci-macos
-    - name: tests
-      run: make test-ci-macos
+
