@@ -20,7 +20,6 @@ bw_mask_t bw_transform_mask(const qsint_t *inverse_suffix_array,
 }
 
 void mask_dump(std::string fn, bw_mask_t mask) {
-  // TODO make this more efficient.
   std::ofstream of;
   of.open(fn, std::ios::binary | std::ios::out);
   mask.serialize(of);
@@ -28,7 +27,6 @@ void mask_dump(std::string fn, bw_mask_t mask) {
 }
 
 bw_mask_t mask_restore(std::string fn) {
-  // TODO make this more efficient.
   std::ifstream f;
   f.open(fn, std::ios::in);
   bw_mask_t ret;
