@@ -7,7 +7,8 @@
 #include <vector>
 
 typedef std::vector<bool> mask_t;
-typedef sdsl::rrr_vector<4> bw_mask_t;
+typedef sdsl::rrr_vector<63> bw_mask_t;
+typedef sdsl::rank_support_rrr<1, 63> bw_mask_rank_t;
 
 /// Compute the mask in suffix array coordinates.
 bw_mask_t bw_transform_mask(const qsint_t *inverse_suffix_array,
@@ -21,7 +22,7 @@ bw_mask_t bw_transform_mask(const qsint_t *inverse_suffix_array,
 
 void mask_dump(std::string fn, bw_mask_t mask) {
   std::ofstream of;
-  of.open(fn, std::ios::binary | std::ios::out);
+  of.open(fn, std::ios::out);
   mask.serialize(of);
   of.close();
 }
