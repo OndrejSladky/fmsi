@@ -20,6 +20,7 @@ bw_mask_t bw_transform_mask(const qsint_t *inverse_suffix_array,
   return bw_mask_t(result);
 }
 
+/// Serialize the mask to a given file.
 void mask_dump(std::string fn, bw_mask_t mask) {
   std::ofstream of;
   of.open(fn, std::ios::out);
@@ -27,6 +28,7 @@ void mask_dump(std::string fn, bw_mask_t mask) {
   of.close();
 }
 
+/// Construct the mask from a given file.
 bw_mask_t mask_restore(std::string fn) {
   std::ifstream f;
   f.open(fn, std::ios::in);

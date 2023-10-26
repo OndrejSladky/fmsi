@@ -4,16 +4,21 @@
 #include <stdexcept>
 #include <string>
 
+/// Consider k-mer represented if at least one of its occurrences is set.
 bool f_or(size_t ones, [[maybe_unused]] size_t total) { return ones; }
 
+/// Consider k-mer represented if all its occurrences are set.
 bool f_and(size_t ones, size_t total) { return ones == total; }
 
+/// Consider k-mer represented if has an odd number of set occurrences.
 bool f_xor(size_t ones, [[maybe_unused]] size_t total) { return ones % 2; }
 
+/// Consider k-mer represented if r <= x <= s for x=#set occurrences.
 bool f_r_to_s(size_t ones, [[maybe_unused]] size_t total, size_t r, size_t s) {
   return ones <= s && ones >= r;
 }
 
+/// Return the appropriate assignable function.
 std::function<bool(int, int)> mask_function(std::string name) {
   if (name == "or")
     return &f_or;
