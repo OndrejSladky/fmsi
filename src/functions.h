@@ -1,8 +1,8 @@
 #pragma once
 
 #include <functional>
-#include <string>
 #include <stdexcept>
+#include <string>
 
 bool f_or(size_t ones, [[maybe_unused]] size_t total) { return ones; }
 

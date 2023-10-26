@@ -42,6 +42,7 @@ bool query_f(fm_index_t fm_index, bw_mask_t mask, bw_mask_rank_t rank,
     total += count_rc;
     ones += rank(to + 1) - rank(from);
   }
-  std::cerr << "Set occurrences: " <<  ones << std::endl << "Total occurrences: " << total << std::endl;
+  std::cerr << "Set occurrences: " << ones << std::endl
+            << "Total occurrences: " << total << std::endl;
   return f(ones, total);
 }
