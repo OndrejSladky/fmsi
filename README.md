@@ -39,7 +39,17 @@ For example: `./ms-index index -k 13 spneumoniae.fa`
 Index (`./ms-index index`) return whether the provided $k$-mer is in the masked superstring or not.
 Note that `./ms-index index` must be run on the provided fasta file beforehand.
 
-Index takes two positional arguments, the fasta file and the queried $k$-mer.
+It recognizes the optional parameter `f` which is the function to determine whether a $k$-mer
+is represented based on the number of set and unset occurrences.
+The recognized functions are following:
+
+- `default` -- Assume that all occurrence are either set or unset and determined the presence by arbitrary occurrence.
+- `or` -- Consider $k$-mer represented when any of its occurence is set.
+- `and` -- Consider $k$-mer represented when all its occurrences are set.
+- `or` -- Consider $k$-mer represented an odd number of occurences is set.
+- `X-Y` (where X and Y can be any integers)-- Consider $k$-mer represented when its number of set occurrences is between X and Y (inclusive).
+
+It then takes two positional arguments, the fasta file and the queried $k$-mer.
 
 For example: `./ms-index query spneumoniae.fa ACGT`
 
