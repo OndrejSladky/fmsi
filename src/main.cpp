@@ -4,6 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "compute_masks.h"
 #include "functions.h"
 #include "index.h"
 #include "mask.h"
@@ -34,7 +35,7 @@ static int version() {
 int ms_index(int argc, char *argv[]) {
   int c;
   bool usage = 0;
-  int k = 13;
+  int k;
   while ((c = getopt(argc, argv, "k:h")) >= 0) {
     switch (c) {
     case 'k':
@@ -61,6 +62,9 @@ int ms_index(int argc, char *argv[]) {
   std::string mask_path = fn + ".mask";
   std::string index_path = fn + ".fm9";
   auto ms = read_masked_superstring(fn);
+  // If k is not set, infer it assuming the standard format of the mask.
+  if (!k)
+    k = infer_k(ms.mask);
   write_superstring(superstring_path, ms.superstring);
   // Construct and dump the BW-transformed mask.
   bw_mask_t bw_transformed_mask = construct_bw_transformed_mask(ms);

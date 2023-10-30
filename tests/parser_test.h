@@ -13,11 +13,8 @@ TEST(PARSER, REVERSE_COMPLEMENT) {
     std::string want_result;
   };
   std::vector<test_case> tests = {
-      {"A", "T"},
-      {"CGT", "ACG"},
-      {"CGCG", "CGCG"},
-      {"ACTG", "CAGT"},
-      {"AAAAC", "GTTTT"},
+      {"A", "T"},       {"CGT", "ACG"},     {"CGCG", "CGCG"},
+      {"ACTG", "CAGT"}, {"AAAAC", "GTTTT"},
   };
 
   for (auto t : tests) {
