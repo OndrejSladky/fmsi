@@ -2,7 +2,7 @@
 
 #include "kseq.h"
 #include "mask.h"
-#include "stdexcept"
+#include <stdexcept>
 #include <stdio.h>
 #include <string>
 #include <zlib.h>

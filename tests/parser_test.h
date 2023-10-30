@@ -7,7 +7,7 @@
 #include "gtest/gtest.h"
 
 namespace {
-TEST(PARSERS, REVERSE_COMPLEMENT) {
+TEST(PARSER, REVERSE_COMPLEMENT) {
   struct test_case {
     std::string input;
     std::string want_result;
