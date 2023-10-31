@@ -57,7 +57,7 @@ For example: `./ms-index query spneumoniae.fa ACGT`
 
 ### Clean
 
-Clean (`./ms-index clean`) recognizes one possitional argument -- the path to the fasta file.
+Clean (`./ms-index clean`) recognizes one positional argument - the path to the fasta file.
 
 
 ## How to test
