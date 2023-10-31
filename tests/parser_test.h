@@ -7,17 +7,14 @@
 #include "gtest/gtest.h"
 
 namespace {
-TEST(PARSERS, REVERSE_COMPLEMENT) {
+TEST(PARSER, REVERSE_COMPLEMENT) {
   struct test_case {
     std::string input;
     std::string want_result;
   };
   std::vector<test_case> tests = {
-      {"A", "T"},
-      {"CGT", "ACG"},
-      {"CGCG", "CGCG"},
-      {"ACTG", "CAGT"},
-      {"AAAAC", "GTTTT"},
+      {"A", "T"},       {"CGT", "ACG"},     {"CGCG", "CGCG"},
+      {"ACTG", "CAGT"}, {"AAAAC", "GTTTT"},
   };
 
   for (auto t : tests) {

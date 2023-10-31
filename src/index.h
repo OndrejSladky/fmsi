@@ -1,6 +1,7 @@
 #pragma once
 
 #include "QSufSort.h"
+#include "compute_masks.h"
 #include "mask.h"
 #include "parser.h"
 
@@ -26,7 +27,6 @@ inline qsint_t _convert_nucleotide(char c) {
 /// suffix sort.
 qsint_t *_convert_superstring(masked_superstring_t ms) {
   size_t size = ms.superstring.size();
-  // Allocate memory also for the
   qsint_t *ret = (qsint_t *)malloc((size + 1) * sizeof(qsint_t));
   for (size_t i = 0; i < size; ++i) {
     ret[i] = _convert_nucleotide(ms.superstring[i]);
@@ -35,14 +35,19 @@ qsint_t *_convert_superstring(masked_superstring_t ms) {
 }
 
 /// Return the mask indexed in the suffix array coordinates.
-bw_mask_t construct_bw_transformed_mask(masked_superstring_t ms) {
+std::vector<std::pair<bw_mask_t, int>>
+construct_bw_transformed_masks(masked_superstring_t ms, int k,
+                               std::vector<int> ls) {
   qsint_t *sa = _convert_superstring(ms);
   // TODO: find out the required size of workspace.
   qsint_t *workspace =
       (qsint_t *)malloc((ms.superstring.size() + 1) * sizeof(qsint_t));
   QSufSortSuffixSort(sa, workspace, (qsint_t)ms.superstring.size(),
                      (qsint_t)ALPHABET_SIZE - 1, 0, 0);
-  auto ret = bw_transform_mask(sa, ms.mask);
+  std::vector<std::pair<bw_mask_t, int>> ret;
+  ret.emplace_back(bw_transform_mask(sa, ms.mask), k);
+  for (int l : ls)
+    ret.emplace_back(bw_transform_mask(sa, compute_l_mask(ms.mask, k, l)), l);
   free(workspace);
   free(sa);
   return ret;

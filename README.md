@@ -27,7 +27,8 @@ The recognized commands are:
 
 Index (`./ms-index index`) recognizes the following arguments:
 
-- `-k value_of_k` - the size of one k-mer.
+- `-k value_of_k` - the size of one k-mer. If not provided k is computed from the masked superstring under the assumption that the last run of zeros has length k-1.
+- `-l value_of_l` - the size of l for which a mask is computed from the mask for k. l should not be greater than k. This argument can be provided multiple times.
 
 Additionally, the last argument is the path to the fasta file containing the masked superstring
 to be indexed.

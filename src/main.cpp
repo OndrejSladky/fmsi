@@ -3,7 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <filesystem>
 
+#include "compute_masks.h"
 #include "functions.h"
 #include "index.h"
 #include "mask.h"
@@ -31,14 +33,22 @@ static int version() {
   return 0;
 }
 
+std::string compute_mask_path(std::string &fn, int k) {
+  return fn + ".k" + std::to_string(k) + ".mask";
+}
+
 int ms_index(int argc, char *argv[]) {
   int c;
   bool usage = 0;
-  int k = 13;
-  while ((c = getopt(argc, argv, "k:h")) >= 0) {
+  int k = 0;
+  std::vector<int> ls;
+  while ((c = getopt(argc, argv, "k:l:h")) >= 0) {
     switch (c) {
     case 'k':
       k = atoi(optarg);
+      break;
+    case 'l':
+      ls.push_back(atoi(optarg));
       break;
     case 'h':
       usage = 1;
@@ -58,17 +68,20 @@ int ms_index(int argc, char *argv[]) {
   }
   std::string fn = std::string(argv[optind]);
   std::string superstring_path = fn + ".sstr";
-  std::string mask_path = fn + ".mask";
-  std::string index_path = fn + ".fm9";
   auto ms = read_masked_superstring(fn);
+  // If k is not set, infer it assuming the standard format of the mask.
+  if (!k)
+    k = infer_k(ms.mask);
   write_superstring(superstring_path, ms.superstring);
-  // Construct and dump the BW-transformed mask.
-  bw_mask_t bw_transformed_mask = construct_bw_transformed_mask(ms);
-  mask_dump(mask_path, bw_transformed_mask);
+  // Construct and dump the BW-transformed masks.
+  auto bw_transformed_masks = construct_bw_transformed_masks(ms, k, ls);
+  for (auto [m, l] : bw_transformed_masks) {
+    mask_dump(compute_mask_path(fn, l), m);
+  }
   // Construct and dump the FM-index.
   fm_index_t fm_index;
   sdsl::construct(fm_index, superstring_path, 1);
-  sdsl::store_to_file(fm_index, index_path);
+  sdsl::store_to_file(fm_index, fn + ".fm9");
   return 0;
 }
 
@@ -98,9 +111,15 @@ int ms_query(int argc, char *argv[]) {
     return 1;
   }
   std::string fn = argv[optind];
-  std::string mask_path = fn + ".mask";
-  std::string index_path = fn + ".fm9";
   std::string kmer = argv[optind + 1];
+  std::string index_path = fn + ".fm9";
+  std::string mask_path = compute_mask_path(fn, (int)kmer.size());
+  if (!std::filesystem::exists(std::filesystem::path{mask_path}) || !std::filesystem::exists(std::filesystem::path{index_path})) {
+      std::cerr << "The index for file " << fn << " and k=" << std::to_string(kmer.size()) << " is not properly created." << std::endl;
+      std::cerr << "Please run `./ms-index index` before." << std::endl;
+      usage_query();
+      return 1;
+  }
   // Load FM-index.
   fm_index_t fm_index;
   sdsl::load_from_file(fm_index, index_path);
