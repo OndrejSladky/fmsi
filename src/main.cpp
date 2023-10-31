@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <filesystem>
 
 #include "compute_masks.h"
 #include "functions.h"
@@ -113,6 +114,12 @@ int ms_query(int argc, char *argv[]) {
   std::string kmer = argv[optind + 1];
   std::string index_path = fn + ".fm9";
   std::string mask_path = compute_mask_path(fn, (int)kmer.size());
+  if (!std::filesystem::exists(std::filesystem::path{mask_path}) || !std::filesystem::exists(std::filesystem::path{index_path})) {
+      std::cerr << "The index for file " << fn << " and k=" << std::to_string(kmer.size()) << " is not properly created." << std::endl;
+      std::cerr << "Please run `./ms-index index` before." << std::endl;
+      usage_query();
+      return 1;
+  }
   // Load FM-index.
   fm_index_t fm_index;
   sdsl::load_from_file(fm_index, index_path);
