@@ -26,7 +26,7 @@ std::function<bool(int, int)> mask_function(std::string name) {
     return &f_and;
   if (name == "xor")
     return &f_xor;
-  if (name == "default")
+  if (name == "all")
     return nullptr;
 
   for (size_t i = 1; i + 1 < name.size(); ++i) {
@@ -48,5 +48,6 @@ std::function<bool(int, int)> mask_function(std::string name) {
       };
     }
   }
+
   throw std::invalid_argument("unknown function name");
 }

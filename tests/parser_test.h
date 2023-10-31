@@ -23,4 +23,21 @@ TEST(PARSER, REVERSE_COMPLEMENT) {
     EXPECT_EQ(got_result, t.want_result);
   }
 }
+TEST(PARSER, COMPUTE_MASK_PATH) {
+  struct test_case {
+    std::string fn;
+    int k;
+    std::string want_result;
+  };
+  std::vector<test_case> tests = {
+      {"human.fa", 31, "human.fa.k31.mask"},
+      {"bombyx.fa.xz", 8, "bombyx.fa.xz.k8.mask"},
+  };
+
+  for (auto t : tests) {
+    auto got_result = compute_mask_path(t.fn, t.k);
+
+    EXPECT_EQ(got_result, t.want_result);
+  }
+}
 } // namespace

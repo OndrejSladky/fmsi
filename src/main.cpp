@@ -81,7 +81,8 @@ static int usage_query() {
                "between X and Y (inclusive)."
             << std::endl;
   std::cerr << "  `-h` - Prints this help and terminates." << std::endl;
-  std::cerr << std::endl << "The last positional argument is the queried k-mer" << std::endl;
+  std::cerr << std::endl
+            << "The last positional argument is the queried k-mer" << std::endl;
   return 1;
 }
 
@@ -101,10 +102,6 @@ static int usage_clean() {
 static int version() {
   std::cout << VERSION << std::endl;
   return 0;
-}
-
-std::string compute_mask_path(std::string &fn, int k) {
-  return fn + ".k" + std::to_string(k) + ".mask";
 }
 
 int ms_index(int argc, char *argv[]) {
@@ -139,6 +136,7 @@ int ms_index(int argc, char *argv[]) {
     std::cerr << "Path to the fasta file is a required argument." << std::endl;
     return usage_index();
   }
+
   std::string superstring_path = fn + ".sstr";
   auto ms = read_masked_superstring(fn);
   // If k is not set, infer it assuming the standard format of the mask.
@@ -163,11 +161,16 @@ int ms_query(int argc, char *argv[]) {
   bool usage = false;
   int c;
   std::string fn;
-  std::function<bool(size_t, size_t)> f = nullptr;
+  std::function<bool(size_t, size_t)> f = mask_function("or");
   while ((c = getopt(argc, argv, "p:f:h")) >= 0) {
     switch (c) {
     case 'f':
-      f = mask_function(optarg);
+        try {
+            f = mask_function(optarg);
+        } catch (std::invalid_argument&) {
+            std::cerr << "Function '" << optarg << "' not recognized." << std::endl;
+            return usage_query();
+        }
       break;
     case 'h':
       usage = true;
@@ -188,9 +191,9 @@ int ms_query(int argc, char *argv[]) {
     return usage_query();
   }
   if (optind + 1 > argc) {
-    usage_query();
-    return 1;
+    return usage_query();
   }
+
   std::string kmer = argv[optind];
   std::string index_path = fn + ".fm9";
   std::string mask_path = compute_mask_path(fn, (int)kmer.size());
@@ -200,8 +203,7 @@ int ms_query(int argc, char *argv[]) {
               << " and k=" << std::to_string(kmer.size())
               << " is not properly created." << std::endl;
     std::cerr << "Please run `./ms-index index` before." << std::endl;
-    usage_query();
-    return 1;
+    return usage_query();
   }
   // Load FM-index.
   fm_index_t fm_index;
@@ -246,6 +248,7 @@ int ms_clean(int argc, char *argv[]) {
     std::cerr << "Path to the fasta file is a required argument." << std::endl;
     return usage_clean();
   }
+
   std::filesystem::remove(fn + ".sstr");
   std::filesystem::remove(fn + ".fm9");
   for (int k = 1; k < 64; ++k) {

@@ -76,3 +76,8 @@ void write_superstring(std::string fn, std::string superstring) {
   of.write(superstring.c_str(), superstring.size());
   of.close();
 }
+
+/// Get the path where to store the mask.
+inline std::string compute_mask_path(std::string &fn, int k) {
+  return fn + ".k" + std::to_string(k) + ".mask";
+}
