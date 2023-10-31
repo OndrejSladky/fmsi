@@ -28,36 +28,37 @@ The recognized commands are:
 
 Index (`./ms-index index`) recognizes the following arguments:
 
-- `-k value_of_k` - the size of one k-mer. If not provided k is computed from the masked superstring under the assumption that the last run of zeros has length k-1.
-- `-l value_of_l` - the size of l for which a mask is computed from the mask for k. l should not be greater than k. This argument can be provided multiple times.
+- `-p path_to_fasta` - The path to the fasta file with masked superstring to be indexed. This is a required argument.
+- `-k value_of_k`    - The size of one k-mer. If not provided k is computed from the masked superstring under the assumption that the last run of zeros has length k-1.
+- `-l value_of_l`    - The size of l for which a mask is computed from the mask for k. l should not be greater than k. This argument can be provided multiple times.
 
-Additionally, the last argument is the path to the fasta file containing the masked superstring
-to be indexed.
-
-For example: `./ms-index index -k 13 spneumoniae.fa` 
+For example: `./ms-index index -p spneumoniae.fa -k 13 -l 12 -l 11` 
 
 ### Query
 
-Index (`./ms-index index`) return whether the provided $k$-mer is in the masked superstring or not.
+Query (`./ms-index index`) return whether the provided $k$-mer is in the masked superstring or not.
 Note that `./ms-index index` must be run on the provided fasta file beforehand.
 
-It recognizes the optional parameter `f` which is the function to determine whether a $k$-mer
+It recognizes the following arguments:
+
+- `-p path_to_fasta` - The path to the fasta file from which the index was created.
+- `-f function`      - A function to determine whether a $k$-mer
 is represented based on the number of set and unset occurrences.
 The recognized functions are following:
+  - `or`  - Consider $k$-mer represented when any of its occurrences is set. This is the default function.
+  - `all` - Assume that all occurrences are either set or unset and determine the presence by arbitrary occurrence.
+  - `and` - Consider $k$-mer represented when all its occurrences are set.
+  - `xor` - Consider $k$-mer represented when an odd number of occurrences is set.
+  - `X-Y` (where X and Y can be any integers) - Consider $k$-mer represented when its number of set occurrences is between X and Y (inclusive).
+It then takes one positional argument - the queried $k$-mer.
 
-- `default` -- Assume that all occurrence are either set or unset and determined the presence by arbitrary occurrence.
-- `or` -- Consider $k$-mer represented when any of its occurence is set.
-- `and` -- Consider $k$-mer represented when all its occurrences are set.
-- `or` -- Consider $k$-mer represented an odd number of occurences is set.
-- `X-Y` (where X and Y can be any integers)-- Consider $k$-mer represented when its number of set occurrences is between X and Y (inclusive).
-
-It then takes two positional arguments, the fasta file and the queried $k$-mer.
-
-For example: `./ms-index query spneumoniae.fa ACGT`
+For example: `./ms-index query -p spneumoniae.fa -f xor ACGT`
 
 ### Clean
 
-Clean (`./ms-index clean`) recognizes one positional argument - the path to the fasta file.
+Clean (`./ms-index clean`) recognizes the following arguments:
+
+- `-p path_to_fasta` - The path to the fasta from which the index was created. This is a required argument.
 
 
 ## How to test

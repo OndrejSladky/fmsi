@@ -23,6 +23,7 @@ clean:
 
 
 $(PROG): $(wildcard *.cpp *.c *.h) ./include/sdsl/suffix_arrays.hpp version.h
+	./create-version.sh
 	$(CXX) $(INCLUDES) $(CXXFLAGS) QSufSort.c main.cpp -o $@ $(LIBS)
 
 version.h: version
