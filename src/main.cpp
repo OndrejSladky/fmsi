@@ -28,6 +28,11 @@ static int usage_query() {
   return 1;
 }
 
+static int usage_clean() {
+    fprintf(stderr, "HERE WILL BE USAGE\n");
+    return 1;
+}
+
 static int version() {
   std::cout << VERSION << std::endl;
   return 0;
@@ -82,6 +87,8 @@ int ms_index(int argc, char *argv[]) {
   fm_index_t fm_index;
   sdsl::construct(fm_index, superstring_path, 1);
   sdsl::store_to_file(fm_index, fn + ".fm9");
+  // Clean the not needed superstring file.
+  std::filesystem::remove(superstring_path);
   return 0;
 }
 
@@ -139,6 +146,19 @@ int ms_query(int argc, char *argv[]) {
   return 0;
 }
 
+int ms_clean(int argc, char *argv[]) {
+    if (argc != 2 || strcmp(argv[1], "-h") == 0) {
+        return usage_clean();
+    }
+    std::string fn = argv[1];
+    std::filesystem::remove(fn + ".sstr");
+    std::filesystem::remove(fn + ".fm9");
+    for (int k = 1; k < 64; ++k) {
+        std::filesystem::remove(compute_mask_path(fn, k));
+    }
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
   int ret = 0;
   if (argc < 2) {
@@ -149,6 +169,8 @@ int main(int argc, char *argv[]) {
     ret = ms_index(argc - 1, argv + 1);
   else if (strcmp(argv[1], "query") == 0)
     ret = ms_query(argc - 1, argv + 1);
+  else if (strcmp(argv[1], "clean") == 0)
+      ret = ms_clean(argc - 1, argv + 1);
   else if (strcmp(argv[1], "-v") == 0)
     return version();
   else

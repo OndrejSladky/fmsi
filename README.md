@@ -21,6 +21,7 @@ The recognized commands are:
 
 - `index` Creates a BWT based index of the given masked superstring.
 - `query` Queries a $k$-mer against an index.
+- `clean` Cleans the files stored for index.
 - `-v`    Prints the version of the program.
 
 ### Index
@@ -53,6 +54,11 @@ The recognized functions are following:
 It then takes two positional arguments, the fasta file and the queried $k$-mer.
 
 For example: `./ms-index query spneumoniae.fa ACGT`
+
+### Clean
+
+Clean (`./ms-index clean`) recognizes one positional argument - the path to the fasta file.
+
 
 ## How to test
 
