@@ -165,12 +165,12 @@ int ms_query(int argc, char *argv[]) {
   while ((c = getopt(argc, argv, "p:f:h")) >= 0) {
     switch (c) {
     case 'f':
-        try {
-            f = mask_function(optarg);
-        } catch (std::invalid_argument&) {
-            std::cerr << "Function '" << optarg << "' not recognized." << std::endl;
-            return usage_query();
-        }
+      try {
+        f = mask_function(optarg);
+      } catch (std::invalid_argument &) {
+        std::cerr << "Function '" << optarg << "' not recognized." << std::endl;
+        return usage_query();
+      }
       break;
     case 'h':
       usage = true;
