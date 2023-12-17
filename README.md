@@ -8,7 +8,7 @@ MS Index provides an efficient implementation of a BWT based indexing tool for
 First clone the repo and its dependencies:
 
 ```
-git clone --recursive https://github.com/OndrejSladky/kmercamel
+git clone --recursive git@github.com:OndrejSladky/ms-index.git
 ```
 
 Compile the program by running `make`.
@@ -36,7 +36,7 @@ For example: `./ms-index index -p spneumoniae.fa -k 13 -l 12 -l 11`
 
 ### Query
 
-Query (`./ms-index index`) return whether the provided $k$-mer is in the masked superstring or not.
+Query (`./ms-index query`) returns whether the provided $k$-mer is in the masked superstring or not.
 Note that `./ms-index index` must be run on the provided fasta file beforehand.
 
 It recognizes the following arguments:
