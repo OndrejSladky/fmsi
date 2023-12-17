@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fstream>
 
 #include "compute_masks.h"
 #include "functions.h"
@@ -58,8 +59,12 @@ static int usage_query() {
       << std::endl;
   std::cerr << std::endl << "The recognized arguments are:" << std::endl;
   std::cerr << "  `-p path_to_fasta` - The path to the fasta file from which "
-               "the index was created."
+               "the index was created. Required."
             << std::endl;
+    std::cerr << "  `-q path_to_queries` - The path to the file with k-mers to query. Required."
+              << std::endl;
+    std::cerr << "  `-k value_of_k` - The size of queried k-mers. Required."
+              << std::endl;
   std::cerr << "  `-f function`      - A function to determine whether a "
                "$k$-mer is represented based on the number of set and unset "
                "occurrences. The recognized functions are following:"
@@ -81,8 +86,6 @@ static int usage_query() {
                "between X and Y (inclusive)."
             << std::endl;
   std::cerr << "  `-h` - Prints this help and terminates." << std::endl;
-  std::cerr << std::endl
-            << "The last positional argument is the queried k-mer" << std::endl;
   return 1;
 }
 
@@ -160,9 +163,11 @@ int ms_index(int argc, char *argv[]) {
 int ms_query(int argc, char *argv[]) {
   bool usage = false;
   int c;
+  int k = 0;
   std::string fn;
+  std::string query_fn;
   std::function<bool(size_t, size_t)> f = mask_function("or");
-  while ((c = getopt(argc, argv, "p:f:h")) >= 0) {
+  while ((c = getopt(argc, argv, "p:f:hq:k:")) >= 0) {
     switch (c) {
     case 'f':
       try {
@@ -178,6 +183,12 @@ int ms_query(int argc, char *argv[]) {
     case 'p':
       fn = optarg;
       break;
+        case 'q':
+            query_fn = optarg;
+            break;
+        case 'k':
+            k = atoi(optarg);
+            break;
     default:
       return usage_query();
     }
@@ -190,17 +201,21 @@ int ms_query(int argc, char *argv[]) {
     std::cerr << "Path to the fasta file is a required argument." << std::endl;
     return usage_query();
   }
-  if (optind + 1 > argc) {
-    return usage_query();
-  }
+    if (query_fn == "") {
+        std::cerr << "Path to the file with queries is a required argument." << std::endl;
+        return usage_query();
+    }
+    if (!k) {
+        std::cerr << "k is a required argument." << std::endl;
+        return usage_query();
+    }
 
-  std::string kmer = argv[optind];
   std::string index_path = fn + ".fm9";
-  std::string mask_path = compute_mask_path(fn, (int)kmer.size());
+  std::string mask_path = compute_mask_path(fn, k);
   if (!std::filesystem::exists(std::filesystem::path{mask_path}) ||
       !std::filesystem::exists(std::filesystem::path{index_path})) {
     std::cerr << "The index for file " << fn
-              << " and k=" << std::to_string(kmer.size())
+              << " and k=" << std::to_string(k)
               << " is not properly created." << std::endl;
     std::cerr << "Please run `./ms-index index` before." << std::endl;
     return usage_query();
@@ -210,18 +225,29 @@ int ms_query(int argc, char *argv[]) {
   sdsl::load_from_file(fm_index, index_path);
   // Load mask.
   bw_mask_t mask = mask_restore(mask_path);
-  bool found;
-  if (f == nullptr) {
-    found = query(fm_index, mask, kmer);
-  } else {
-    bw_mask_rank_t rank(&mask);
-    found = query_f(fm_index, mask, rank, f, kmer);
-  }
-  if (found)
-    std::cout << "FOUND" << std::endl;
-  else
-    std::cout << "NOT FOUND" << std::endl;
-  return 0;
+
+
+    std::ifstream query_file(query_fn);
+    std::string kmer;
+    while(query_file >> kmer) {
+        if (kmer.size() != size_t(k)) {
+            std::cerr << "Skipped - size of queried k-mer " << kmer.size() << " is not k=" << k << std::endl;
+            std::cout << "SKIPPED" << std::endl;
+            continue;
+        }
+        bool found;
+        if (f == nullptr) {
+            found = query(fm_index, mask, kmer);
+        } else {
+            bw_mask_rank_t rank(&mask);
+            found = query_f(fm_index, mask, rank, f, kmer);
+        }
+        if (found)
+            std::cout << "FOUND" << std::endl;
+        else
+            std::cout << "NOT FOUND" << std::endl;
+    }
+    return 0;
 }
 
 int ms_clean(int argc, char *argv[]) {

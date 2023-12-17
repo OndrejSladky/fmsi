@@ -41,7 +41,9 @@ Note that `./ms-index index` must be run on the provided fasta file beforehand.
 
 It recognizes the following arguments:
 
-- `-p path_to_fasta` - The path to the fasta file from which the index was created.
+- `-p path_to_fasta` - The path to the fasta file from which the index was created. Required.
+- `-q path_to_queries` - The path to the file with $k$-mer to be queried (each on a separate line). Required.
+- `-k value_of_k`    - The size of one k-mer. Required.
 - `-f function`      - A function to determine whether a $k$-mer
 is represented based on the number of set and unset occurrences.
 The recognized functions are following:
@@ -50,7 +52,6 @@ The recognized functions are following:
   - `and` - Consider $k$-mer represented when all its occurrences are set.
   - `xor` - Consider $k$-mer represented when an odd number of occurrences is set.
   - `X-Y` (where X and Y can be any integers) - Consider $k$-mer represented when its number of set occurrences is between X and Y (inclusive).
-It then takes one positional argument - the queried $k$-mer.
 
 For example: `./ms-index query -p spneumoniae.fa -f xor ACGT`
 
