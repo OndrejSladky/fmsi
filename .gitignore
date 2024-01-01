@@ -2,6 +2,9 @@ ms-index.dSYM/
 
 src/version.h
 
+CMakeLists.txt
+cmake-build-debug/
+
 
 # BW files
 *.mask

@@ -1,11 +1,11 @@
 #pragma once
 
 #include "kseq.h"
-#include "mask.h"
 #include <stdexcept>
 #include <stdio.h>
 #include <string>
 #include <zlib.h>
+#include "mask.h"
 
 KSEQ_INIT(gzFile, gzread)
 
@@ -78,6 +78,6 @@ void write_superstring(std::string fn, std::string superstring) {
 }
 
 /// Get the path where to store the mask.
-inline std::string compute_mask_path(std::string &fn, int k) {
-  return fn + ".k" + std::to_string(k) + ".mask";
+inline std::string compute_mask_path(std::string &fn, int k, bool include_k) {
+  return fn + (include_k ? ".k" + std::to_string(k) : "") + ".mask";
 }

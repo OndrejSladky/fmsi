@@ -3,10 +3,8 @@
 #include <functional>
 
 #include "mask.h"
+#include "parser.h"
 
-// TODO: find out what the constants mean.
-typedef sdsl::csa_wt<sdsl::wt_huff<sdsl::rrr_vector<127>>, 512, 1024>
-    fm_index_t;
 
 /// Determine whether the given k-mer (or its RC) is represented.
 /// If the k-mer appears in the superstring, determine its presence from

@@ -34,20 +34,32 @@ qsint_t *_convert_superstring(masked_superstring_t ms) {
   return ret;
 }
 
+typedef std::vector<std::pair<bw_mask_t, int>> masks_with_k_t;
+
 /// Return the mask indexed in the suffix array coordinates.
-std::vector<std::pair<bw_mask_t, int>>
-construct_bw_transformed_masks(masked_superstring_t ms, int k,
+masks_with_k_t construct_bw_transformed_masks(masked_superstring_t ms, int k,
                                std::vector<int> ls) {
   qsint_t *sa = _convert_superstring(ms);
   // TODO: find out the required size of workspace.
   qsint_t *workspace = new qsint_t[ms.superstring.size() + 1];
   QSufSortSuffixSort(sa, workspace, (qsint_t)ms.superstring.size(),
                      (qsint_t)ALPHABET_SIZE - 1, 0, 0);
-  std::vector<std::pair<bw_mask_t, int>> ret;
+  masks_with_k_t ret;
   ret.emplace_back(bw_transform_mask(sa, ms.mask), k);
   for (int l : ls)
     ret.emplace_back(bw_transform_mask(sa, compute_l_mask(ms.mask, k, l)), l);
   delete[] workspace;
   delete[] sa;
   return ret;
+}
+
+/// Store the FM-index and masks to a associated file.
+void dump_index_and_masks(std::string fn, fm_index_t  fm_index, masks_with_k_t bw_transformed_masks) {
+    // Dump the masks.
+    for (auto [m, l] : bw_transformed_masks) {
+        // Include the k value in the name only if there are more masks.
+        mask_dump(compute_mask_path(fn, l, bw_transformed_masks.size() > 1), m);
+    }
+    // Construct and dump the FM-index.
+    sdsl::store_to_file(fm_index, fn + ".fm9");
 }
