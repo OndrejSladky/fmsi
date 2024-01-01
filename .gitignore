@@ -1,6 +1,7 @@
 ms-index.dSYM/
 
 src/version.h
+tests/bin/
 
 CMakeLists.txt
 cmake-build-debug/
