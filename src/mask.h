@@ -1,11 +1,11 @@
 #pragma once
 
 #include "QSufSort.h"
-#include "query.h"
 #include <fstream>
 #include <iostream>
 #include <sdsl/rrr_vector.hpp>
 #include <vector>
+#include <sdsl/suffix_arrays.hpp>
 
 typedef std::vector<bool> mask_t;
 typedef sdsl::rrr_vector<63> bw_mask_t;
