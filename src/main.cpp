@@ -107,6 +107,41 @@ static int usage_query() {
   return 1;
 }
 
+static int usage_normalize() {
+    std::cerr << "MS-Index Normalize normalizes the given FM-index so that it does not occupy more space than needed."
+              << std::endl;
+    std::cerr << std::endl << "The recognized arguments are:" << std::endl;
+    std::cerr << "  `-p path_to_fasta` - The path to the fasta file from which "
+                 "the index was created. Required."
+              << std::endl;
+    std::cerr << "  `-k value_of_k` - The size of queried k-mers. Required."
+              << std::endl;
+    std::cerr << "  `-f function`      - A function to determine whether a "
+                 "$k$-mer is represented based on the number of set and unset "
+                 "occurrences. The recognized functions are following:"
+              << std::endl;
+    std::cerr << "      `or`  - Consider $k$-mer represented when any of its "
+                 "occurrences is set."
+              << std::endl;
+    std::cerr << "      `all` - Assume that all occurrence are either set or "
+                 "unset and determine the presence by arbitrary occurrence."
+              << std::endl;
+    std::cerr << "      `and` - Consider $k$-mer represented when all its "
+                 "occurrences are set."
+              << std::endl;
+    std::cerr << "      `xor` - Consider $k$-mer represented when an odd number "
+                 "of occurrences is set."
+              << std::endl;
+    std::cerr << "      `X-Y` (where X and Y can be any integers) - Consider "
+                 "$k$-mer represented when its number of set occurrences is "
+                 "between X and Y (inclusive)."
+              << std::endl;
+    std::cerr << "  `-d` - Value of d_max. Default 5." << std::endl;
+    std::cerr << "  `-s` - Only print the masked superstring and do not normalize the FM-index" << std::endl;
+    std::cerr << "  `-h` - Prints this help and terminates." << std::endl;
+    return 1;
+}
+
 static int usage_clean() {
   std::cerr
       << "MS-Index Index creates the index for a given masked superstring."
@@ -341,9 +376,10 @@ int ms_normalize(int argc, char *argv[]) {
     int c;
     int k = 0;
     int d_max = 5;
+    bool only_print = false;
     std::string fn;
     std::function<bool(size_t, size_t)> f = mask_function("or");
-    while ((c = getopt(argc, argv, "p:hk:d:f:")) >= 0) {
+    while ((c = getopt(argc, argv, "p:hk:d:f:s")) >= 0) {
         switch (c) {
             case 'f':
                 try {
@@ -352,6 +388,7 @@ int ms_normalize(int argc, char *argv[]) {
                     std::cerr << "Function '" << optarg << "' not recognized." << std::endl;
                     return usage_query();
                 }
+                break;
             case 'h':
                 usage = true;
                 break;
@@ -364,12 +401,15 @@ int ms_normalize(int argc, char *argv[]) {
             case 'd':
                 d_max = atoi(optarg);
                 break;
+            case 's':
+                only_print = true;
+                break;
             default:
-                return usage_merge();
+                return usage_normalize();
         }
     }
     if (usage) {
-        usage_merge();
+        usage_normalize();
         return 0;
     }
 
@@ -388,11 +428,14 @@ int ms_normalize(int argc, char *argv[]) {
     d_max = std::min(k - 1, d_max);
     auto masked_superstring = local(fm_index, decompressed_mask, rank, klcp, f, k, d_max);
 
-    std::cerr << masked_superstring.superstring << std::endl;
-    for (size_t i = 0; i < masked_superstring.mask.size(); ++i) {
-        std::cerr << masked_superstring.mask[i];
+    if (only_print) {
+        for (size_t i = 0; i < masked_superstring.superstring.size(); ++i) {
+            if (masked_superstring.mask[i]) std::cout << masked_superstring.superstring[i];
+            else std::cout << to_lower(masked_superstring.superstring[i]);
+        }
+        std::cout << std::endl;
+        return 0;
     }
-    std::cerr << std::endl;
 
     std::string superstring_path = fn + ".sstr";
     write_superstring(superstring_path, masked_superstring.superstring);

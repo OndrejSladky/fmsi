@@ -7,6 +7,10 @@
 #include "query.h"
 #include <sdsl/rank_support_v5.hpp>
 
+char to_lower(char c) {
+    return c - 'A' + 'a';
+}
+
 constexpr auto letters = "ACGT";
 
 /// Convert the encoded KMer representation to string.
