@@ -8,7 +8,7 @@
 bool f_or(size_t ones, [[maybe_unused]] size_t total) { return ones; }
 
 /// Consider k-mer represented if all its occurrences are set.
-bool f_and(size_t ones, size_t total) { return ones == total; }
+bool f_and(size_t ones, size_t total) { return total && ones == total; }
 
 /// Consider k-mer represented if has an odd number of set occurrences.
 bool f_xor(size_t ones, [[maybe_unused]] size_t total) { return ones % 2; }
