@@ -5,7 +5,6 @@
 #include "mask.h"
 #include "parser.h"
 
-
 /// Determine whether the given k-mer (or its RC) is represented.
 /// If the k-mer appears in the superstring, determine its presence from
 /// arbitrary occurrence.

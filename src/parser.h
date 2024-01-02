@@ -1,11 +1,11 @@
 #pragma once
 
 #include "kseq.h"
+#include "mask.h"
 #include <stdexcept>
 #include <stdio.h>
 #include <string>
 #include <zlib.h>
-#include "mask.h"
 
 KSEQ_INIT(gzFile, gzread)
 

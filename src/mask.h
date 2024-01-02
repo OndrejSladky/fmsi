@@ -4,15 +4,15 @@
 #include <fstream>
 #include <iostream>
 #include <sdsl/rrr_vector.hpp>
-#include <vector>
 #include <sdsl/suffix_arrays.hpp>
+#include <vector>
 
 typedef std::vector<bool> mask_t;
 typedef sdsl::rrr_vector<63> bw_mask_t;
 typedef sdsl::rank_support_rrr<1, 63> bw_mask_rank_t;
 // TODO: find out what the constants mean.
 typedef sdsl::csa_wt<sdsl::wt_huff<sdsl::rrr_vector<127>>, 512, 1024>
-        fm_index_t;
+    fm_index_t;
 
 /// Compute the mask in suffix array coordinates.
 bw_mask_t bw_transform_mask(const qsint_t *inverse_suffix_array,
@@ -26,29 +26,31 @@ bw_mask_t bw_transform_mask(const qsint_t *inverse_suffix_array,
 
 /// Restore the original mask.
 bw_mask_t bw_transform_mask(fm_index_t fm_index, mask_t mask) {
-    auto bw_mask = sdsl::bit_vector(mask.size() + 1);
-    for (size_t i = 0; i < mask.size(); ++i) {
-        size_t index = fm_index[i];
-        int value = index == mask.size() ? 0 : mask[index];
-        bw_mask[i] = value;
-    }
-    return {bw_mask};
+  auto bw_mask = sdsl::bit_vector(mask.size() + 1);
+  for (size_t i = 0; i < mask.size(); ++i) {
+    size_t index = fm_index[i];
+    int value = index == mask.size() ? 0 : mask[index];
+    bw_mask[i] = value;
+  }
+  return {bw_mask};
 }
 
 /// Restore the original mask.
 mask_t bw_inverse_mask(fm_index_t fm_index, bw_mask_t bw_mask) {
-    mask_t mask = mask_t(bw_mask.size() - 1);
-    for (size_t i = 0; i < bw_mask.size(); ++i) {
-        size_t index = fm_index[i];
-        if (index < mask.size()) mask[fm_index[i]] = bw_mask[i];
-    }
-    return mask;
+  mask_t mask = mask_t(bw_mask.size() - 1);
+  for (size_t i = 0; i < bw_mask.size(); ++i) {
+    size_t index = fm_index[i];
+    if (index < mask.size())
+      mask[fm_index[i]] = bw_mask[i];
+  }
+  return mask;
 }
 
 /// Copy elements from the source mask to the destination mask.
 void merge_masks(mask_t &destination, mask_t source) {
-    destination.reserve(destination.size() + source.size());
-    for (auto x : source) destination.push_back(x);
+  destination.reserve(destination.size() + source.size());
+  for (auto x : source)
+    destination.push_back(x);
 }
 
 /// Serialize the mask to a given file.

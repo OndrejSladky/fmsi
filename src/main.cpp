@@ -1,18 +1,18 @@
 #include <filesystem>
 #include <sdsl/suffix_arrays.hpp>
 
-#include "query.h"
 #include "compute_masks.h"
 #include "functions.h"
 #include "index.h"
-#include "version.h"
 #include "parser.h"
+#include "query.h"
+#include "version.h"
 
+#include <fstream>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <fstream>
 
 static int usage() {
   std::cerr
@@ -61,10 +61,11 @@ static int usage_query() {
   std::cerr << "  `-p path_to_fasta` - The path to the fasta file from which "
                "the index was created. Required."
             << std::endl;
-    std::cerr << "  `-q path_to_queries` - The path to the file with k-mers to query. Required."
-              << std::endl;
-    std::cerr << "  `-k value_of_k` - The size of queried k-mers. Required."
-              << std::endl;
+  std::cerr << "  `-q path_to_queries` - The path to the file with k-mers to "
+               "query. Required."
+            << std::endl;
+  std::cerr << "  `-k value_of_k` - The size of queried k-mers. Required."
+            << std::endl;
   std::cerr << "  `-f function`      - A function to determine whether a "
                "$k$-mer is represented based on the number of set and unset "
                "occurrences. The recognized functions are following:"
@@ -148,108 +149,111 @@ int ms_index(int argc, char *argv[]) {
   // Construct the BW-transformed masks.
   auto bw_transformed_masks = construct_bw_transformed_masks(ms, k, ls);
   // Construct the FM-index.
-    fm_index_t fm_index;
-    sdsl::construct(fm_index, superstring_path, 1);
-    dump_index_and_masks(fn, fm_index, bw_transformed_masks);
-    // Clean the not needed superstring file.
-    std::filesystem::remove(superstring_path);
+  fm_index_t fm_index;
+  sdsl::construct(fm_index, superstring_path, 1);
+  dump_index_and_masks(fn, fm_index, bw_transformed_masks);
+  // Clean the not needed superstring file.
+  std::filesystem::remove(superstring_path);
   return 0;
 }
 
 /// Restore the FM-index and the mask.
-/// If the path is invalid, print error and return false. Otherwise return true and set the provided return arguments.
-bool load_index_pair(std::string fn, int k, fm_index_t &ret_fm_index, bw_mask_t &ret_bw_mask) {
-    std::string index_path = fn + ".fm9";
-    std::string mask_path = compute_mask_path(fn, k, false);
-    // If there is no general file for the mask, try k-specific.
-    if (!std::filesystem::exists(std::filesystem::path{mask_path}))
-        mask_path = compute_mask_path(fn, k, true);
-    if (!std::filesystem::exists(std::filesystem::path{mask_path}) ||
-        !std::filesystem::exists(std::filesystem::path{index_path})) {
-        std::cerr << "The index for file " << fn
-                  << " and k=" << std::to_string(k)
-                  << " is not properly created." << std::endl;
-        std::cerr << "Please run `./ms-index index` before." << std::endl;
-        usage_query();
-        return false;
-    }
-    // Load FM-index.
-    sdsl::load_from_file(ret_fm_index, index_path);
-    // Load mask.
-    ret_bw_mask = mask_restore(mask_path);
-    return true;
+/// If the path is invalid, print error and return false. Otherwise return true
+/// and set the provided return arguments.
+bool load_index_pair(std::string fn, int k, fm_index_t &ret_fm_index,
+                     bw_mask_t &ret_bw_mask) {
+  std::string index_path = fn + ".fm9";
+  std::string mask_path = compute_mask_path(fn, k, false);
+  // If there is no general file for the mask, try k-specific.
+  if (!std::filesystem::exists(std::filesystem::path{mask_path}))
+    mask_path = compute_mask_path(fn, k, true);
+  if (!std::filesystem::exists(std::filesystem::path{mask_path}) ||
+      !std::filesystem::exists(std::filesystem::path{index_path})) {
+    std::cerr << "The index for file " << fn << " and k=" << std::to_string(k)
+              << " is not properly created." << std::endl;
+    std::cerr << "Please run `./ms-index index` before." << std::endl;
+    usage_query();
+    return false;
+  }
+  // Load FM-index.
+  sdsl::load_from_file(ret_fm_index, index_path);
+  // Load mask.
+  ret_bw_mask = mask_restore(mask_path);
+  return true;
 }
 
 int ms_query(int argc, char *argv[]) {
-    bool usage = false;
-    int c;
-    int k = 0;
-    std::string fn;
-    std::string query_fn;
-    std::function<bool(size_t, size_t)> f = mask_function("or");
-    while ((c = getopt(argc, argv, "p:f:hq:k:")) >= 0) {
-        switch (c) {
-            case 'f':
-                try {
-                    f = mask_function(optarg);
-                } catch (std::invalid_argument &) {
-                    std::cerr << "Function '" << optarg << "' not recognized." << std::endl;
-                    return usage_query();
-                }
-                break;
-            case 'h':
-                usage = true;
-                break;
-            case 'p':
-                fn = optarg;
-                break;
-            case 'q':
-                query_fn = optarg;
-                break;
-            case 'k':
-                k = atoi(optarg);
-                break;
-            default:
-                return usage_query();
-        }
-    }
-    if (usage) {
-        usage_query();
-        return 0;
-    } else if (fn.empty()) {
-        std::cerr << "Path to the fasta file is a required argument." << std::endl;
+  bool usage = false;
+  int c;
+  int k = 0;
+  std::string fn;
+  std::string query_fn;
+  std::function<bool(size_t, size_t)> f = mask_function("or");
+  while ((c = getopt(argc, argv, "p:f:hq:k:")) >= 0) {
+    switch (c) {
+    case 'f':
+      try {
+        f = mask_function(optarg);
+      } catch (std::invalid_argument &) {
+        std::cerr << "Function '" << optarg << "' not recognized." << std::endl;
         return usage_query();
-    } else if (query_fn.empty()) {
-        std::cerr << "Path to the file with queries is a required argument." << std::endl;
-        return usage_query();
+      }
+      break;
+    case 'h':
+      usage = true;
+      break;
+    case 'p':
+      fn = optarg;
+      break;
+    case 'q':
+      query_fn = optarg;
+      break;
+    case 'k':
+      k = atoi(optarg);
+      break;
+    default:
+      return usage_query();
     }
-
-
-    fm_index_t fm_index;
-    bw_mask_t mask;
-    if (!load_index_pair(fn, k, fm_index, mask)) return 1;
-
-    std::ifstream query_file(query_fn);
-    std::string kmer;
-    while(query_file >> kmer) {
-        if (kmer.size() != size_t(k)) {
-            std::cerr << "Skipped - size of queried k-mer " << kmer.size() << " is not k=" << k << std::endl;
-            std::cout << "SKIPPED" << std::endl;
-            continue;
-        }
-        bool found;
-        if (f == nullptr) {
-            found = query(fm_index, mask, kmer);
-        } else {
-            bw_mask_rank_t rank(&mask);
-            found = query_f(fm_index, mask, rank, f, kmer);
-        }
-        if (found)
-            std::cout << "FOUND" << std::endl;
-        else
-            std::cout << "NOT FOUND" << std::endl;
-    }
+  }
+  if (usage) {
+    usage_query();
     return 0;
+  } else if (fn.empty()) {
+    std::cerr << "Path to the fasta file is a required argument." << std::endl;
+    return usage_query();
+  } else if (query_fn.empty()) {
+    std::cerr << "Path to the file with queries is a required argument."
+              << std::endl;
+    return usage_query();
+  }
+
+  fm_index_t fm_index;
+  bw_mask_t mask;
+  if (!load_index_pair(fn, k, fm_index, mask))
+    return 1;
+
+  std::ifstream query_file(query_fn);
+  std::string kmer;
+  while (query_file >> kmer) {
+    if (kmer.size() != size_t(k)) {
+      std::cerr << "Skipped - size of queried k-mer " << kmer.size()
+                << " is not k=" << k << std::endl;
+      std::cout << "SKIPPED" << std::endl;
+      continue;
+    }
+    bool found;
+    if (f == nullptr) {
+      found = query(fm_index, mask, kmer);
+    } else {
+      bw_mask_rank_t rank(&mask);
+      found = query_f(fm_index, mask, rank, f, kmer);
+    }
+    if (found)
+      std::cout << "FOUND" << std::endl;
+    else
+      std::cout << "NOT FOUND" << std::endl;
+  }
+  return 0;
 }
 
 int ms_merge(int argc, char *argv[]) {
@@ -270,9 +274,9 @@ int ms_merge(int argc, char *argv[]) {
     case 'r':
       result_fn = optarg;
       break;
-        case 'k':
-            k = atoi(optarg);
-            break;
+    case 'k':
+      k = atoi(optarg);
+      break;
     default:
       return usage_query();
     }
@@ -284,34 +288,35 @@ int ms_merge(int argc, char *argv[]) {
 
   std::string result_superstring;
   mask_t result_mask;
-  for (auto& fn : fns) {
-      fm_index_t fm_index;
-      bw_mask_t mask;
-      std::cerr << "Starting " << fn << std::endl;
-      if (!load_index_pair(fn, k, fm_index, mask)) return 1;
-      std::cerr << "Loaded " << fn << std::endl;
+  for (auto &fn : fns) {
+    fm_index_t fm_index;
+    bw_mask_t mask;
+    std::cerr << "Starting " << fn << std::endl;
+    if (!load_index_pair(fn, k, fm_index, mask))
+      return 1;
+    std::cerr << "Loaded " << fn << std::endl;
 
-      merge_masks(result_mask, bw_inverse_mask(fm_index, mask));
-      std::cerr << "Merged masks for " << fn << std::endl;
-      result_superstring += sdsl::extract(fm_index, 0, fm_index.size() - 2);
-      std::cerr << "Read superstring for " << fn << std::endl;
+    merge_masks(result_mask, bw_inverse_mask(fm_index, mask));
+    std::cerr << "Merged masks for " << fn << std::endl;
+    result_superstring += sdsl::extract(fm_index, 0, fm_index.size() - 2);
+    std::cerr << "Read superstring for " << fn << std::endl;
   }
 
   std::string result_superstring_fn = result_fn + ".sstr";
   write_superstring(result_superstring_fn, result_superstring);
   std::cerr << "Resulting superstring written" << std::endl;
-    fm_index_t fm_index;
-    sdsl::construct(fm_index, result_superstring_fn, 1);
-    std::cerr << "Resulting FM-index constructed" << std::endl;
+  fm_index_t fm_index;
+  sdsl::construct(fm_index, result_superstring_fn, 1);
+  std::cerr << "Resulting FM-index constructed" << std::endl;
 
   masks_with_k_t masks = {{bw_transform_mask(fm_index, result_mask), k}};
-    std::cerr << "Resulting mask constructed" << std::endl;
+  std::cerr << "Resulting mask constructed" << std::endl;
 
-    dump_index_and_masks(result_fn, fm_index, masks);
-    std::cerr << "Written mask and FM-index" << std::endl;
-    // Clean the not needed superstring file.
-    std::filesystem::remove(result_superstring_fn);
-    return 0;
+  dump_index_and_masks(result_fn, fm_index, masks);
+  std::cerr << "Written mask and FM-index" << std::endl;
+  // Clean the not needed superstring file.
+  std::filesystem::remove(result_superstring_fn);
+  return 0;
 }
 
 int ms_clean(int argc, char *argv[]) {
@@ -359,7 +364,7 @@ int main(int argc, char *argv[]) {
   else if (strcmp(argv[1], "clean") == 0)
     ret = ms_clean(argc - 1, argv + 1);
   else if (strcmp(argv[1], "merge") == 0)
-      ret = ms_merge(argc - 1, argv + 1);
+    ret = ms_merge(argc - 1, argv + 1);
   else if (strcmp(argv[1], "-v") == 0)
     return version();
   else if (strcmp(argv[1], "-h") == 0) {
