@@ -4,10 +4,10 @@
 #include "compute_masks.h"
 #include "functions.h"
 #include "index.h"
+#include "local.h"
 #include "parser.h"
 #include "query.h"
 #include "version.h"
-#include "local.h"
 
 #include <fstream>
 #include <stdio.h>
@@ -52,19 +52,19 @@ static int usage_index() {
 }
 
 static int usage_merge() {
-    std::cerr
-            << "MS-Index Merge merges several indices."
+  std::cerr << "MS-Index Merge merges several indices." << std::endl;
+  std::cerr << std::endl << "The recognized arguments are:" << std::endl;
+  std::cerr << "  `-p path_to_fasta`  - The path to the fasta file which "
+               "should be merged. Can be provided multiple times. It is "
+               "expected that it appears at least twice."
             << std::endl;
-    std::cerr << std::endl << "The recognized arguments are:" << std::endl;
-    std::cerr << "  `-p path_to_fasta`  - The path to the fasta file which should be merged. Can be provided multiple times. It is expected that it appears at least twice."
-              << std::endl;
-    std::cerr << "  `-r path_of_result` - The path where the result should be stored. This is a required argument."
-              << std::endl;
-    std::cerr << "  `-k value_of_k`     - The size of one k-mer."
-              << std::endl;
-    std::cerr << "  `-h`                - Prints this help and terminates."
-              << std::endl;
-    return 1;
+  std::cerr << "  `-r path_of_result` - The path where the result should be "
+               "stored. This is a required argument."
+            << std::endl;
+  std::cerr << "  `-k value_of_k`     - The size of one k-mer." << std::endl;
+  std::cerr << "  `-h`                - Prints this help and terminates."
+            << std::endl;
+  return 1;
 }
 
 static int usage_query() {
@@ -108,38 +108,41 @@ static int usage_query() {
 }
 
 static int usage_normalize() {
-    std::cerr << "MS-Index Normalize normalizes the given FM-index so that it does not occupy more space than needed."
-              << std::endl;
-    std::cerr << std::endl << "The recognized arguments are:" << std::endl;
-    std::cerr << "  `-p path_to_fasta` - The path to the fasta file from which "
-                 "the index was created. Required."
-              << std::endl;
-    std::cerr << "  `-k value_of_k` - The size of queried k-mers. Required."
-              << std::endl;
-    std::cerr << "  `-f function`      - A function to determine whether a "
-                 "$k$-mer is represented based on the number of set and unset "
-                 "occurrences. The recognized functions are following:"
-              << std::endl;
-    std::cerr << "      `or`  - Consider $k$-mer represented when any of its "
-                 "occurrences is set."
-              << std::endl;
-    std::cerr << "      `all` - Assume that all occurrence are either set or "
-                 "unset and determine the presence by arbitrary occurrence."
-              << std::endl;
-    std::cerr << "      `and` - Consider $k$-mer represented when all its "
-                 "occurrences are set."
-              << std::endl;
-    std::cerr << "      `xor` - Consider $k$-mer represented when an odd number "
-                 "of occurrences is set."
-              << std::endl;
-    std::cerr << "      `X-Y` (where X and Y can be any integers) - Consider "
-                 "$k$-mer represented when its number of set occurrences is "
-                 "between X and Y (inclusive)."
-              << std::endl;
-    std::cerr << "  `-d` - Value of d_max. Default 5." << std::endl;
-    std::cerr << "  `-s` - Only print the masked superstring and do not normalize the FM-index" << std::endl;
-    std::cerr << "  `-h` - Prints this help and terminates." << std::endl;
-    return 1;
+  std::cerr << "MS-Index Normalize normalizes the given FM-index so that it "
+               "does not occupy more space than needed."
+            << std::endl;
+  std::cerr << std::endl << "The recognized arguments are:" << std::endl;
+  std::cerr << "  `-p path_to_fasta` - The path to the fasta file from which "
+               "the index was created. Required."
+            << std::endl;
+  std::cerr << "  `-k value_of_k` - The size of queried k-mers. Required."
+            << std::endl;
+  std::cerr << "  `-f function`      - A function to determine whether a "
+               "$k$-mer is represented based on the number of set and unset "
+               "occurrences. The recognized functions are following:"
+            << std::endl;
+  std::cerr << "      `or`  - Consider $k$-mer represented when any of its "
+               "occurrences is set."
+            << std::endl;
+  std::cerr << "      `all` - Assume that all occurrence are either set or "
+               "unset and determine the presence by arbitrary occurrence."
+            << std::endl;
+  std::cerr << "      `and` - Consider $k$-mer represented when all its "
+               "occurrences are set."
+            << std::endl;
+  std::cerr << "      `xor` - Consider $k$-mer represented when an odd number "
+               "of occurrences is set."
+            << std::endl;
+  std::cerr << "      `X-Y` (where X and Y can be any integers) - Consider "
+               "$k$-mer represented when its number of set occurrences is "
+               "between X and Y (inclusive)."
+            << std::endl;
+  std::cerr << "  `-d` - Value of d_max. Default 5." << std::endl;
+  std::cerr << "  `-s` - Only print the masked superstring and do not "
+               "normalize the FM-index"
+            << std::endl;
+  std::cerr << "  `-h` - Prints this help and terminates." << std::endl;
+  return 1;
 }
 
 static int usage_clean() {
@@ -224,7 +227,6 @@ bool load_index_pair(std::string fn, int k, fm_index_t &ret_fm_index,
     std::cerr << "The index for file " << fn << " and k=" << std::to_string(k)
               << " is not properly created." << std::endl;
     std::cerr << "Please run `./ms-index index` before." << std::endl;
-    usage_query();
     return false;
   }
   // Load FM-index.
@@ -282,7 +284,7 @@ int ms_query(int argc, char *argv[]) {
   fm_index_t fm_index;
   bw_mask_t mask;
   if (!load_index_pair(fn, k, fm_index, mask))
-    return 1;
+    return usage_query();
 
   std::ifstream query_file(query_fn);
   std::string kmer;
@@ -345,7 +347,7 @@ int ms_merge(int argc, char *argv[]) {
     bw_mask_t mask;
     std::cerr << "Starting " << fn << std::endl;
     if (!load_index_pair(fn, k, fm_index, mask))
-      return 1;
+      return usage_merge();
     std::cerr << "Loaded " << fn << std::endl;
 
     merge_masks(result_mask, bw_inverse_mask(fm_index, mask));
@@ -371,84 +373,90 @@ int ms_merge(int argc, char *argv[]) {
   return 0;
 }
 
+void print_masked_superstring(masked_superstring_t ms) {
+  std::cout << "> normalized masked superstring" << std::endl;
+  for (size_t i = 0; i < ms.superstring.size(); ++i) {
+    if (ms.mask[i])
+      std::cout << ms.superstring[i];
+    else
+      std::cout << to_lower(ms.superstring[i]);
+  }
+  std::cout << std::endl;
+}
+
 int ms_normalize(int argc, char *argv[]) {
-    bool usage = false;
-    int c;
-    int k = 0;
-    int d_max = 5;
-    bool only_print = false;
-    std::string fn;
-    std::function<bool(size_t, size_t)> f = mask_function("or");
-    while ((c = getopt(argc, argv, "p:hk:d:f:s")) >= 0) {
-        switch (c) {
-            case 'f':
-                try {
-                    f = mask_function(optarg);
-                } catch (std::invalid_argument &) {
-                    std::cerr << "Function '" << optarg << "' not recognized." << std::endl;
-                    return usage_query();
-                }
-                break;
-            case 'h':
-                usage = true;
-                break;
-            case 'p':
-                fn = optarg;
-                break;
-            case 'k':
-                k = atoi(optarg);
-                break;
-            case 'd':
-                d_max = atoi(optarg);
-                break;
-            case 's':
-                only_print = true;
-                break;
-            default:
-                return usage_normalize();
-        }
+  bool usage = false;
+  int c;
+  int k = 0;
+  int d_max = 5;
+  bool only_print = false;
+  std::string fn;
+  std::function<bool(size_t, size_t)> f = mask_function("or");
+  while ((c = getopt(argc, argv, "p:hk:d:f:s")) >= 0) {
+    switch (c) {
+    case 'f':
+      try {
+        f = mask_function(optarg);
+      } catch (std::invalid_argument &) {
+        std::cerr << "Function '" << optarg << "' not recognized." << std::endl;
+        return usage_query();
+      }
+      break;
+    case 'h':
+      usage = true;
+      break;
+    case 'p':
+      fn = optarg;
+      break;
+    case 'k':
+      k = atoi(optarg);
+      break;
+    case 'd':
+      d_max = atoi(optarg);
+      break;
+    case 's':
+      only_print = true;
+      break;
+    default:
+      return usage_normalize();
     }
-    if (usage) {
-        usage_normalize();
-        return 0;
-    }
-
-    fm_index_t fm_index;
-    bw_mask_t mask;
-    if (!load_index_pair(fn, k, fm_index, mask))
-        return 1;
-
-
-    auto klcp = mask_restore(fn + ".klcp");
-    sdsl::bit_vector decompressed_mask(mask.size());
-    for (size_t i = 0; i < mask.size(); ++i) {
-        decompressed_mask[i] = mask[i];
-    }
-    auto rank = sdsl::rank_support_v5<>(&decompressed_mask);
-    d_max = std::min(k - 1, d_max);
-    auto masked_superstring = local(fm_index, decompressed_mask, rank, klcp, f, k, d_max);
-
-    if (only_print) {
-        for (size_t i = 0; i < masked_superstring.superstring.size(); ++i) {
-            if (masked_superstring.mask[i]) std::cout << masked_superstring.superstring[i];
-            else std::cout << to_lower(masked_superstring.superstring[i]);
-        }
-        std::cout << std::endl;
-        return 0;
-    }
-
-    std::string superstring_path = fn + ".sstr";
-    write_superstring(superstring_path, masked_superstring.superstring);
-    // Construct the BW-transformed masks.
-    auto bw_transformed_masks = construct_bw_transformed_masks(masked_superstring, k, {});
-    // Construct the FM-index.
-    fm_index_t fm_index_normalized;
-    sdsl::construct(fm_index_normalized, superstring_path, 1);
-
-    dump_index_and_masks(fn, fm_index_normalized, bw_transformed_masks);
-    // Clean the not needed superstring file.
-    std::filesystem::remove(superstring_path);
+  }
+  if (usage) {
+    usage_normalize();
     return 0;
+  }
+
+  fm_index_t fm_index;
+  bw_mask_t mask;
+  if (!load_index_pair(fn, k, fm_index, mask))
+    return usage_normalize();
+
+  auto klcp = mask_restore(fn + ".klcp");
+  sdsl::bit_vector plain_mask(mask.size());
+  for (size_t i = 0; i < mask.size(); ++i) {
+    plain_mask[i] = mask[i];
+  }
+  d_max = std::min(k - 1, d_max);
+  auto masked_superstring = local(fm_index, plain_mask, klcp, f, k, d_max);
+
+  if (only_print) {
+    print_masked_superstring(masked_superstring);
+    return 0;
+  }
+
+  std::string superstring_path = fn + ".sstr";
+  write_superstring(superstring_path, masked_superstring.superstring);
+  // Construct the BW-transformed masks.
+  auto bw_transformed_masks =
+      construct_bw_transformed_masks(masked_superstring, k, {});
+  // Construct the FM-index.
+  fm_index_t fm_index_normalized;
+  sdsl::construct(fm_index_normalized, superstring_path, 1);
+
+  dump_index_and_masks(fn, fm_index_normalized, bw_transformed_masks);
+  // Clean the not needed superstring file.
+  std::filesystem::remove(superstring_path);
+  return 0;
 }
 
 int ms_clean(int argc, char *argv[]) {
@@ -477,7 +485,7 @@ int ms_clean(int argc, char *argv[]) {
   }
 
   std::filesystem::remove(fn + ".sstr");
-    std::filesystem::remove(fn + ".klcp");
+  std::filesystem::remove(fn + ".klcp");
   std::filesystem::remove(fn + ".fm9");
   std::filesystem::remove(compute_mask_path(fn, 0, false));
   for (int k = 1; k < 64; ++k) {
@@ -499,7 +507,7 @@ int main(int argc, char *argv[]) {
   else if (strcmp(argv[1], "merge") == 0)
     ret = ms_merge(argc - 1, argv + 1);
   else if (strcmp(argv[1], "normalize") == 0)
-      ret = ms_normalize(argc - 1, argv + 1);
+    ret = ms_normalize(argc - 1, argv + 1);
   else if (strcmp(argv[1], "-v") == 0)
     return version();
   else if (strcmp(argv[1], "-h") == 0) {

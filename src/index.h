@@ -4,8 +4,8 @@
 #include "compute_masks.h"
 #include "mask.h"
 #include "parser.h"
-#include <sdsl/rrr_vector.hpp>
 #include <sdsl/lcp_bitcompressed.hpp>
+#include <sdsl/rrr_vector.hpp>
 
 constexpr int ALPHABET_SIZE = 4;
 
@@ -59,17 +59,14 @@ typedef sdsl::rrr_vector<63> klcp_t;
 
 /// Construct the lcp array from the csa.
 klcp_t construct_klcp(std::string fn, int k) {
-    sdsl::lcp_bitcompressed<> lcp;
-    sdsl::construct(lcp, fn, 1);
-    sdsl::bit_vector klcp(lcp.size());
-    for (size_t i = 0; i < lcp.size(); ++i) {
-        klcp[i] = lcp[i] >= (unsigned)k;
-    }
-    return klcp_t(klcp);
+  sdsl::lcp_bitcompressed<> lcp;
+  sdsl::construct(lcp, fn, 1);
+  sdsl::bit_vector klcp(lcp.size());
+  for (size_t i = 0; i < lcp.size(); ++i) {
+    klcp[i] = lcp[i] >= (unsigned)k;
+  }
+  return klcp_t(klcp);
 }
-
-
-
 
 /// Store the FM-index with its klcp array and masks to a associated file.
 void dump_index_and_masks(std::string fn, fm_index_t fm_index,
@@ -81,7 +78,8 @@ void dump_index_and_masks(std::string fn, fm_index_t fm_index,
   }
 
   // Construct and dump the KLCP array.
-  mask_dump(fn + ".klcp", construct_klcp(fn + ".sstr", bw_transformed_masks[0].second));
+  mask_dump(fn + ".klcp",
+            construct_klcp(fn + ".sstr", bw_transformed_masks[0].second));
 
   // Dump the FM-index.
   sdsl::store_to_file(fm_index, fn + ".fm9");

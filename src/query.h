@@ -51,4 +51,3 @@ bool query_f(fm_index_t fm_index, bw_mask_t mask, bw_mask_rank_t rank,
             << "Total occurrences: " << total << std::endl;
   return f(ones, total);
 }
-
