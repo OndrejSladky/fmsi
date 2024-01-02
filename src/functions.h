@@ -18,8 +18,9 @@ bool f_r_to_s(size_t ones, [[maybe_unused]] size_t total, size_t r, size_t s) {
   return ones <= s && ones >= r;
 }
 
+typedef std::function<bool(int, int)> assignable_function_t;
 /// Return the appropriate assignable function.
-std::function<bool(int, int)> mask_function(std::string name) {
+assignable_function_t mask_function(std::string name) {
   if (name == "or")
     return &f_or;
   if (name == "and")

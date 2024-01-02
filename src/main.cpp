@@ -7,6 +7,7 @@
 #include "parser.h"
 #include "query.h"
 #include "version.h"
+#include "local.h"
 
 #include <fstream>
 #include <stdio.h>
@@ -335,6 +336,63 @@ int ms_merge(int argc, char *argv[]) {
   return 0;
 }
 
+int ms_normalize(int argc, char *argv[]) {
+    bool usage = false;
+    int c;
+    int k = 0;
+    int d_max = 5;
+    std::string fn;
+    std::function<bool(size_t, size_t)> f = mask_function("or");
+    while ((c = getopt(argc, argv, "p:hk:d:")) >= 0) {
+        switch (c) {
+            case 'h':
+                usage = true;
+                break;
+            case 'p':
+                fn = optarg;
+                break;
+            case 'k':
+                k = atoi(optarg);
+                break;
+            case 'd':
+                d_max = atoi(optarg);
+                break;
+            default:
+                return usage_merge();
+        }
+    }
+    if (usage) {
+        usage_merge();
+        return 0;
+    }
+
+    fm_index_t fm_index;
+    bw_mask_t mask;
+    if (!load_index_pair(fn, k, fm_index, mask))
+        return 1;
+
+    auto klcp = construct_klcp(fm_index, k);
+    sdsl::bit_vector decompressed_mask(mask.size());
+    for (size_t i = 0; i < mask.size(); ++i) {
+        decompressed_mask[i] = mask[i];
+    }
+    auto rank = sdsl::rank_support_v5<>(&decompressed_mask);
+    auto masked_superstring = local(fm_index, decompressed_mask, rank, klcp, f, k, d_max);
+
+    std::string superstring_path = fn + ".sstr";
+    write_superstring(superstring_path, masked_superstring.superstring);
+    // Construct the BW-transformed masks.
+    auto bw_transformed_masks = construct_bw_transformed_masks(masked_superstring, k, {});
+    // Construct the FM-index.
+    fm_index_t fm_index_normalized;
+    sdsl::construct(fm_index_normalized, superstring_path, 1);
+
+    dump_index_and_masks(fn, fm_index_normalized, bw_transformed_masks);
+    // Clean the not needed superstring file.
+    std::filesystem::remove(superstring_path);
+    return 0;
+}
+
 int ms_clean(int argc, char *argv[]) {
   bool usage = false;
   int c;
@@ -381,6 +439,8 @@ int main(int argc, char *argv[]) {
     ret = ms_clean(argc - 1, argv + 1);
   else if (strcmp(argv[1], "merge") == 0)
     ret = ms_merge(argc - 1, argv + 1);
+  else if (strcmp(argv[1], "normalize") == 0)
+      ret = ms_normalize(argc - 1, argv + 1);
   else if (strcmp(argv[1], "-v") == 0)
     return version();
   else if (strcmp(argv[1], "-h") == 0) {

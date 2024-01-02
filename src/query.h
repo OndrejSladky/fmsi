@@ -31,7 +31,7 @@ bool query(fm_index_t fm_index, bw_mask_t mask, std::string kmer) {
 /// the total number of occurrences, the number of set occurrences via
 /// the provided function f.
 bool query_f(fm_index_t fm_index, bw_mask_t mask, bw_mask_rank_t rank,
-             std::function<bool(int, int)> f, std::string kmer) {
+             assignable_function_t f, std::string kmer) {
   size_t total = 0;
   size_t ones = 0;
   auto rc = reverse_complement(kmer);
@@ -51,3 +51,4 @@ bool query_f(fm_index_t fm_index, bw_mask_t mask, bw_mask_rank_t rank,
             << "Total occurrences: " << total << std::endl;
   return f(ones, total);
 }
+

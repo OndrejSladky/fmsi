@@ -4,6 +4,8 @@
 #include "compute_masks.h"
 #include "mask.h"
 #include "parser.h"
+#include <sdsl/rrr_vector.hpp>
+#include <sdsl/lcp_bitcompressed.hpp>
 
 constexpr int ALPHABET_SIZE = 4;
 
@@ -52,6 +54,23 @@ masks_with_k_t construct_bw_transformed_masks(masked_superstring_t ms, int k,
   delete[] sa;
   return ret;
 }
+
+typedef sdsl::rrr_vector<63> klcp_t;
+
+/// Construct the lcp array from the csa.
+klcp_t construct_klcp(fm_index_t  fm_index, int k) {
+    sdsl::lcp_bitcompressed<> lcp;
+    sdsl::cache_config cfg(true);
+    sdsl::construct_lcp(lcp, fm_index, cfg);
+    sdsl::bit_vector klcp(lcp.size());
+    for (size_t i = 0; i < lcp.size(); ++i) {
+        klcp[i] = lcp[i] >= (unsigned)k;
+    }
+    return klcp_t(klcp);
+}
+
+
+
 
 /// Store the FM-index and masks to a associated file.
 void dump_index_and_masks(std::string fn, fm_index_t fm_index,
