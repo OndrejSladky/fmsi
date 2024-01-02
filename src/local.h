@@ -50,13 +50,17 @@ bool query_f_and_delete(fm_index_t &fm_index, sdsl::bit_vector &mask, sdsl::rank
     total += sdsl::backward_search(fm_index, 0, fm_index.size() - 1, kmer.begin(),
                                    kmer.end(), from, to);
     if (total) {
-        ones += rank(to + 1) - rank(from);
+        for (size_t i = from; i <= to; ++i) {
+            if (mask[i]) ones++;
+        }
     }
     auto count_rc = sdsl::backward_search(fm_index, 0, fm_index.size() - 1,
                                           rc.begin(), rc.end(), from_rc, to_rc);
     if (count_rc) {
         total += count_rc;
-        ones += rank(to_rc + 1) - rank(from_rc);
+        for (size_t i = from_rc; i <= to_rc; ++i) {
+            if (mask[i]) ones++;
+        }
     }
     bool res = f(ones, total);
     if (res) {
@@ -144,7 +148,7 @@ masked_superstring_t next_generalized_simplitig(fm_index_t &fm_index, sdsl::bit_
 std::string next_k_mer(fm_index_t &fm_index, sdsl::bit_vector &mask, sdsl::rank_support_v5<> &rank, klcp_t &klcp, assignable_function_t f, size_t &start, int k) {
     while(start < fm_index.size()) {
         size_t end = start;
-        while (end < klcp.size() && klcp[end]) {
+        while (end + 1 < klcp.size() && klcp[end+1]) {
             end++;
         }
         end++;
