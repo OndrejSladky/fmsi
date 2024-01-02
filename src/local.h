@@ -58,8 +58,6 @@ bool query_f_and_delete(fm_index_t &fm_index, sdsl::bit_vector &mask, sdsl::rank
         total += count_rc;
         ones += rank(to_rc + 1) - rank(from_rc);
     }
-    std::cerr << "Set occurrences: " << ones << std::endl
-              << "Total occurrences: " << total << std::endl;
     bool res = f(ones, total);
     if (res) {
         delete_k_mer(mask, from, to - from + 1, from_rc, to_rc - from_rc + 1, f);
@@ -87,6 +85,7 @@ masked_superstring_t merge_superstrings(masked_superstring_t a, masked_superstri
     std::string superstring = a.superstring + b.superstring;
     for (auto m : a.mask) mask.push_back(m);
     for (auto m : b.mask) mask.push_back(m);
+    assert(mask.size() == superstring.size());
     return {mask, superstring};
 }
 
@@ -101,7 +100,7 @@ masked_superstring_t next_generalized_simplitig(fm_index_t &fm_index, sdsl::bit_
     int d_l = 1, d_r = 1;
     while (d_l <= d_max || d_r <= d_max) {
         if (d_r <= d_l) {
-            auto base = last.substr(0, k - d_r);
+            auto base = last.substr(d_r);
             auto ext = extension(fm_index, mask, rank, base, f, d_r, false);
             if (ext.empty()) {
                 // No right extension found.
@@ -110,11 +109,14 @@ masked_superstring_t next_generalized_simplitig(fm_index_t &fm_index, sdsl::bit_
                 // Extend the generalized simplitig to the right.
                 last = base + ext;
                 simplitig_back += ext;
+                assert(ext.size() == d_r);
+                for (int i = 1; i < d_r; ++i) mask_back.push_back(0);
                 mask_back.push_back(1);
                 d_r = 1;
+                assert(mask_back.size() + k - 1 == simplitig_back.size());
             }
         } else {
-            auto base = first.substr(d_l);
+            auto base = first.substr( 0, k - d_l);
             auto ext = extension(fm_index, mask, rank, base, f, d_l, true);
             if (ext.empty()) {
                 // No left extension found.
@@ -124,11 +126,16 @@ masked_superstring_t next_generalized_simplitig(fm_index_t &fm_index, sdsl::bit_
                 first = ext + base;
                 std::reverse(ext.begin(), ext.end());
                 simplitig_front += ext;
+                assert(ext.size() == d_l);
+                for (int i = 1; i < d_l; ++i) mask_front.push_back(0);
                 mask_front.push_back(1);
+                assert(mask_front.size() == simplitig_front.size());
+                d_l = 1;
             }
         }
     }
     for (int i = 1; i < k; ++i) mask_back.push_back(0);
+    assert(mask_back.size() == simplitig_back.size());
     std::reverse(mask_front.begin(), mask_front.end());
     std::reverse(simplitig_front.begin(), simplitig_front.end());
     return merge_superstrings( {mask_front, simplitig_front}, {mask_back, simplitig_back});
@@ -142,6 +149,10 @@ std::string next_k_mer(fm_index_t &fm_index, sdsl::bit_vector &mask, sdsl::rank_
         }
         end++;
         size_t index = fm_index[start];
+        if (index + k - 1 >= fm_index.size()) {
+            start = end;
+            continue;
+        }
         auto k_mer = sdsl::extract(fm_index, index, index + k - 1);
         start = end;
         if (query_f_and_delete(fm_index, mask, rank, f, k_mer)) {

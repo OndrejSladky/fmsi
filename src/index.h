@@ -58,10 +58,9 @@ masks_with_k_t construct_bw_transformed_masks(masked_superstring_t ms, int k,
 typedef sdsl::rrr_vector<63> klcp_t;
 
 /// Construct the lcp array from the csa.
-klcp_t construct_klcp(fm_index_t  fm_index, int k) {
+klcp_t construct_klcp(std::string fn, int k) {
     sdsl::lcp_bitcompressed<> lcp;
-    sdsl::cache_config cfg(true);
-    sdsl::construct_lcp(lcp, fm_index, cfg);
+    sdsl::construct(lcp, fn, 1);
     sdsl::bit_vector klcp(lcp.size());
     for (size_t i = 0; i < lcp.size(); ++i) {
         klcp[i] = lcp[i] >= (unsigned)k;
@@ -72,7 +71,7 @@ klcp_t construct_klcp(fm_index_t  fm_index, int k) {
 
 
 
-/// Store the FM-index and masks to a associated file.
+/// Store the FM-index with its klcp array and masks to a associated file.
 void dump_index_and_masks(std::string fn, fm_index_t fm_index,
                           masks_with_k_t bw_transformed_masks) {
   // Dump the masks.
@@ -80,6 +79,10 @@ void dump_index_and_masks(std::string fn, fm_index_t fm_index,
     // Include the k value in the name only if there are more masks.
     mask_dump(compute_mask_path(fn, l, bw_transformed_masks.size() > 1), m);
   }
-  // Construct and dump the FM-index.
+
+  // Construct and dump the KLCP array.
+  mask_dump(fn + ".klcp", construct_klcp(fn + ".sstr", bw_transformed_masks[0].second));
+
+  // Dump the FM-index.
   sdsl::store_to_file(fm_index, fn + ".fm9");
 }

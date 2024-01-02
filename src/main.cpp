@@ -343,8 +343,15 @@ int ms_normalize(int argc, char *argv[]) {
     int d_max = 5;
     std::string fn;
     std::function<bool(size_t, size_t)> f = mask_function("or");
-    while ((c = getopt(argc, argv, "p:hk:d:")) >= 0) {
+    while ((c = getopt(argc, argv, "p:hk:d:f:")) >= 0) {
         switch (c) {
+            case 'f':
+                try {
+                    f = mask_function(optarg);
+                } catch (std::invalid_argument &) {
+                    std::cerr << "Function '" << optarg << "' not recognized." << std::endl;
+                    return usage_query();
+                }
             case 'h':
                 usage = true;
                 break;
@@ -371,13 +378,21 @@ int ms_normalize(int argc, char *argv[]) {
     if (!load_index_pair(fn, k, fm_index, mask))
         return 1;
 
-    auto klcp = construct_klcp(fm_index, k);
+
+    auto klcp = mask_restore(fn + ".klcp");
     sdsl::bit_vector decompressed_mask(mask.size());
     for (size_t i = 0; i < mask.size(); ++i) {
         decompressed_mask[i] = mask[i];
     }
     auto rank = sdsl::rank_support_v5<>(&decompressed_mask);
+    d_max = std::min(k - 1, d_max);
     auto masked_superstring = local(fm_index, decompressed_mask, rank, klcp, f, k, d_max);
+
+    std::cerr << masked_superstring.superstring << std::endl;
+    for (size_t i = 0; i < masked_superstring.mask.size(); ++i) {
+        std::cerr << masked_superstring.mask[i];
+    }
+    std::cerr << std::endl;
 
     std::string superstring_path = fn + ".sstr";
     write_superstring(superstring_path, masked_superstring.superstring);
@@ -419,6 +434,7 @@ int ms_clean(int argc, char *argv[]) {
   }
 
   std::filesystem::remove(fn + ".sstr");
+    std::filesystem::remove(fn + ".klcp");
   std::filesystem::remove(fn + ".fm9");
   std::filesystem::remove(compute_mask_path(fn, 0, false));
   for (int k = 1; k < 64; ++k) {
