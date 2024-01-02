@@ -50,6 +50,22 @@ static int usage_index() {
   return 1;
 }
 
+static int usage_merge() {
+    std::cerr
+            << "MS-Index Merge merges several indices."
+            << std::endl;
+    std::cerr << std::endl << "The recognized arguments are:" << std::endl;
+    std::cerr << "  `-p path_to_fasta`  - The path to the fasta file which should be merged. Can be provided multiple times. It is expected that it appears at least twice."
+              << std::endl;
+    std::cerr << "  `-r path_of_result` - The path where the result should be stored. This is a required argument."
+              << std::endl;
+    std::cerr << "  `-k value_of_k`     - The size of one k-mer."
+              << std::endl;
+    std::cerr << "  `-h`                - Prints this help and terminates."
+              << std::endl;
+    return 1;
+}
+
 static int usage_query() {
   std::cerr << "MS-Index Query return whether the provided $k$-mer is in the "
                "masked superstring or not."
@@ -278,11 +294,11 @@ int ms_merge(int argc, char *argv[]) {
       k = atoi(optarg);
       break;
     default:
-      return usage_query();
+      return usage_merge();
     }
   }
   if (usage) {
-    usage_query();
+    usage_merge();
     return 0;
   }
 
