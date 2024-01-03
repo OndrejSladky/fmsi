@@ -24,8 +24,16 @@ bw_mask_t bw_transform_mask(const qsint_t *inverse_suffix_array,
   return {result};
 }
 
-/// Restore the original mask.
-bw_mask_t bw_transform_mask(fm_index_t fm_index, mask_t mask) {
+mask_t bw_inverse_mask(const qsint_t *inverse_suffix_array,
+                            bw_mask_t &transformed_mask) {
+    mask_t result (transformed_mask.size() - 1);
+    for (uint64_t i = 0; i < result.size(); ++i) {
+        result[i] = transformed_mask[inverse_suffix_array[i]];
+    }
+    return result;
+}
+
+bw_mask_t bw_transform_mask(fm_index_t &fm_index, mask_t &mask) {
   auto bw_mask = sdsl::bit_vector(mask.size() + 1);
   for (size_t i = 0; i < mask.size(); ++i) {
     size_t index = fm_index[i];
@@ -36,7 +44,7 @@ bw_mask_t bw_transform_mask(fm_index_t fm_index, mask_t mask) {
 }
 
 /// Restore the original mask.
-mask_t bw_inverse_mask(fm_index_t fm_index, bw_mask_t bw_mask) {
+mask_t bw_inverse_mask(fm_index_t &fm_index, bw_mask_t &bw_mask) {
   mask_t mask = mask_t(bw_mask.size() - 1);
   for (size_t i = 0; i < bw_mask.size(); ++i) {
     size_t index = fm_index[i];
@@ -47,7 +55,7 @@ mask_t bw_inverse_mask(fm_index_t fm_index, bw_mask_t bw_mask) {
 }
 
 /// Copy elements from the source mask to the destination mask.
-void merge_masks(mask_t &destination, mask_t source) {
+void merge_masks(mask_t &destination, mask_t &source) {
   destination.reserve(destination.size() + source.size());
   for (auto x : source)
     destination.push_back(x);

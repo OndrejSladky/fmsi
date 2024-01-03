@@ -350,10 +350,15 @@ int ms_merge(int argc, char *argv[]) {
       return usage_merge();
     std::cerr << "Loaded " << fn << std::endl;
 
-    merge_masks(result_mask, bw_inverse_mask(fm_index, mask));
-    std::cerr << "Merged masks for " << fn << std::endl;
-    result_superstring += sdsl::extract(fm_index, 0, fm_index.size() - 2);
+    auto superstring_fn = fn + ".sstr";
+    auto current_superstring = sdsl::extract(fm_index, 0, fm_index.size() - 2);
+    std::destroy(fm_index.begin(), fm_index.end());
+    write_superstring(superstring_fn, current_superstring);
+    result_superstring += current_superstring;
     std::cerr << "Read superstring for " << fn << std::endl;
+    auto original_mask = construct_inverse_mask(current_superstring, mask);
+    merge_masks(result_mask, original_mask);
+    std::cerr << "Merged masks for " << fn << std::endl;
   }
 
   std::string result_superstring_fn = result_fn + ".sstr";
@@ -363,7 +368,8 @@ int ms_merge(int argc, char *argv[]) {
   sdsl::construct(fm_index, result_superstring_fn, 1);
   std::cerr << "Resulting FM-index constructed" << std::endl;
 
-  masks_with_k_t masks = {{bw_transform_mask(fm_index, result_mask), k}};
+  masks_with_k_t masks = construct_bw_transformed_masks(
+      {result_mask, result_superstring}, k, {});
   std::cerr << "Resulting mask constructed" << std::endl;
 
   dump_index_and_masks(result_fn, fm_index, masks);
