@@ -352,7 +352,6 @@ int ms_merge(int argc, char *argv[]) {
 
     auto superstring_fn = fn + ".sstr";
     auto current_superstring = sdsl::extract(fm_index, 0, fm_index.size() - 2);
-    std::destroy(fm_index.begin(), fm_index.end());
     write_superstring(superstring_fn, current_superstring);
     result_superstring += current_superstring;
     std::cerr << "Read superstring for " << fn << std::endl;
