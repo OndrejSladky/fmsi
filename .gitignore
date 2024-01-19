@@ -7,10 +7,13 @@ CMakeLists.txt
 cmake-build-debug/
 
 
+*.sdsl
+
 # BW files
 *.mask
 *.sstr
 *.fm9
+*.klcp
 
 # Compiled binaries
 ms-index

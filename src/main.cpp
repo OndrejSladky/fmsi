@@ -8,6 +8,7 @@
 #include "parser.h"
 #include "query.h"
 #include "version.h"
+#include "normalize.h"
 
 #include <fstream>
 #include <stdio.h>
@@ -395,9 +396,10 @@ int ms_normalize(int argc, char *argv[]) {
   int k = 0;
   int d_max = 5;
   bool only_print = false;
+  bool use_local = false;
   std::string fn;
   std::function<bool(size_t, size_t)> f = mask_function("or");
-  while ((c = getopt(argc, argv, "p:hk:d:f:s")) >= 0) {
+  while ((c = getopt(argc, argv, "p:hk:d:f:sl")) >= 0) {
     switch (c) {
     case 'f':
       try {
@@ -422,6 +424,9 @@ int ms_normalize(int argc, char *argv[]) {
     case 's':
       only_print = true;
       break;
+    case 'l':
+        use_local = true;
+        break;
     default:
       return usage_normalize();
     }
@@ -442,7 +447,14 @@ int ms_normalize(int argc, char *argv[]) {
     plain_mask[i] = mask[i];
   }
   d_max = std::min(k - 1, d_max);
-  auto masked_superstring = local(fm_index, plain_mask, klcp, f, k, d_max);
+  masked_superstring_t masked_superstring;
+  if (use_local) {
+      masked_superstring = local(fm_index, plain_mask, klcp, f, k, d_max);
+  } else {
+      auto superstring = sdsl::extract(fm_index, 0, fm_index.size() - 2);
+      auto original_mask = construct_inverse_mask(superstring, mask);
+      masked_superstring = normalize(superstring, original_mask, k, f);
+  }
 
   if (only_print) {
     print_masked_superstring(masked_superstring);
