@@ -57,15 +57,15 @@ masks_with_k_t construct_bw_transformed_masks(masked_superstring_t ms, int k,
 
 /// Return the mask indexed in the suffix array coordinates.
 mask_t construct_inverse_mask(std::string superstring, bw_mask_t bw_mask) {
-    qsint_t *sa = _convert_superstring({{}, superstring});
-    // TODO: find out the required size of workspace.
-    qsint_t *workspace = new qsint_t[superstring.size() + 1];
-    QSufSortSuffixSort(sa, workspace, (qsint_t)superstring.size(),
-                       (qsint_t)ALPHABET_SIZE - 1, 0, 0);
-    auto ret = bw_inverse_mask(sa, bw_mask);
-    delete[] workspace;
-    delete[] sa;
-    return ret;
+  qsint_t *sa = _convert_superstring({{}, superstring});
+  // TODO: find out the required size of workspace.
+  qsint_t *workspace = new qsint_t[superstring.size() + 1];
+  QSufSortSuffixSort(sa, workspace, (qsint_t)superstring.size(),
+                     (qsint_t)ALPHABET_SIZE - 1, 0, 0);
+  auto ret = bw_inverse_mask(sa, bw_mask);
+  delete[] workspace;
+  delete[] sa;
+  return ret;
 }
 
 typedef sdsl::rrr_vector<63> klcp_t;

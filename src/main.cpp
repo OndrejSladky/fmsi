@@ -5,10 +5,10 @@
 #include "functions.h"
 #include "index.h"
 #include "local.h"
+#include "normalize.h"
 #include "parser.h"
 #include "query.h"
 #include "version.h"
-#include "normalize.h"
 
 #include <fstream>
 #include <stdio.h>
@@ -368,8 +368,8 @@ int ms_merge(int argc, char *argv[]) {
   sdsl::construct(fm_index, result_superstring_fn, 1);
   std::cerr << "Resulting FM-index constructed" << std::endl;
 
-  masks_with_k_t masks = construct_bw_transformed_masks(
-      {result_mask, result_superstring}, k, {});
+  masks_with_k_t masks =
+      construct_bw_transformed_masks({result_mask, result_superstring}, k, {});
   std::cerr << "Resulting mask constructed" << std::endl;
 
   dump_index_and_masks(result_fn, fm_index, masks);
@@ -425,8 +425,8 @@ int ms_normalize(int argc, char *argv[]) {
       only_print = true;
       break;
     case 'l':
-        use_local = true;
-        break;
+      use_local = true;
+      break;
     default:
       return usage_normalize();
     }
@@ -449,11 +449,11 @@ int ms_normalize(int argc, char *argv[]) {
   d_max = std::min(k - 1, d_max);
   masked_superstring_t masked_superstring;
   if (use_local) {
-      masked_superstring = local(fm_index, plain_mask, klcp, f, k, d_max);
+    masked_superstring = local(fm_index, plain_mask, klcp, f, k, d_max);
   } else {
-      auto superstring = sdsl::extract(fm_index, 0, fm_index.size() - 2);
-      auto original_mask = construct_inverse_mask(superstring, mask);
-      masked_superstring = normalize(superstring, original_mask, k, f);
+    auto superstring = sdsl::extract(fm_index, 0, fm_index.size() - 2);
+    auto original_mask = construct_inverse_mask(superstring, mask);
+    masked_superstring = normalize(superstring, original_mask, k, f);
   }
 
   if (only_print) {

@@ -25,12 +25,12 @@ bw_mask_t bw_transform_mask(const qsint_t *inverse_suffix_array,
 }
 
 mask_t bw_inverse_mask(const qsint_t *inverse_suffix_array,
-                            bw_mask_t &transformed_mask) {
-    mask_t result (transformed_mask.size() - 1);
-    for (uint64_t i = 0; i < result.size(); ++i) {
-        result[i] = transformed_mask[inverse_suffix_array[i]];
-    }
-    return result;
+                       bw_mask_t &transformed_mask) {
+  mask_t result(transformed_mask.size() - 1);
+  for (uint64_t i = 0; i < result.size(); ++i) {
+    result[i] = transformed_mask[inverse_suffix_array[i]];
+  }
+  return result;
 }
 
 bw_mask_t bw_transform_mask(fm_index_t &fm_index, mask_t &mask) {
