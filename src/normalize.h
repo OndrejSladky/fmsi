@@ -23,7 +23,7 @@ void count_k_mers(camel::kh_S64_t *k_mers, std::string superstring, mask_t mask,
   camel::kh_OCC64_t *total_occ = camel::kh_init_OCC64();
   camel::kh_OCC64_t *ones_occ = camel::kh_init_OCC64();
 
-  for (size_t i = 0; i < k - 1; ++i) {
+  for (int i = 0; i < k - 1; ++i) {
     k_mer = (k_mer << 2) | camel::NucleotideToInt(superstring[i]);
   }
   for (size_t i = 0; i < superstring.size() - k + 1; ++i) {

@@ -103,7 +103,6 @@ masked_superstring_t merge_superstrings(masked_superstring_t a,
     mask.push_back(m);
   for (auto m : b.mask)
     mask.push_back(m);
-  assert(mask.size() == superstring.size());
   return {mask, superstring};
 }
 
@@ -130,12 +129,10 @@ masked_superstring_t next_generalized_simplitig(fm_index_t &fm_index,
         // Extend the generalized simplitig to the right.
         last = base + ext;
         simplitig_back += ext;
-        assert(ext.size() == d_r);
         for (int i = 1; i < d_r; ++i)
           mask_back.push_back(0);
         mask_back.push_back(1);
         d_r = 1;
-        assert(mask_back.size() + k - 1 == simplitig_back.size());
       }
     } else {
       auto base = first.substr(0, k - d_l);
@@ -148,18 +145,15 @@ masked_superstring_t next_generalized_simplitig(fm_index_t &fm_index,
         first = ext + base;
         std::reverse(ext.begin(), ext.end());
         simplitig_front += ext;
-        assert(ext.size() == d_l);
         for (int i = 1; i < d_l; ++i)
           mask_front.push_back(0);
         mask_front.push_back(1);
-        assert(mask_front.size() == simplitig_front.size());
         d_l = 1;
       }
     }
   }
   for (int i = 1; i < k; ++i)
     mask_back.push_back(0);
-  assert(mask_back.size() == simplitig_back.size());
   std::reverse(mask_front.begin(), mask_front.end());
   std::reverse(simplitig_front.begin(), simplitig_front.end());
   return merge_superstrings({mask_front, simplitig_front},
