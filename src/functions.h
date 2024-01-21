@@ -8,7 +8,7 @@
 bool f_or(size_t ones, [[maybe_unused]] size_t total) { return ones; }
 
 /// Consider k-mer represented if all its occurrences are set.
-bool f_and(size_t ones, size_t total) { return ones == total; }
+bool f_and(size_t ones, size_t total) { return total && ones == total; }
 
 /// Consider k-mer represented if has an odd number of set occurrences.
 bool f_xor(size_t ones, [[maybe_unused]] size_t total) { return ones % 2; }
@@ -18,8 +18,9 @@ bool f_r_to_s(size_t ones, [[maybe_unused]] size_t total, size_t r, size_t s) {
   return ones <= s && ones >= r;
 }
 
+typedef std::function<bool(int, int)> assignable_function_t;
 /// Return the appropriate assignable function.
-std::function<bool(int, int)> mask_function(std::string name) {
+assignable_function_t mask_function(std::string name) {
   if (name == "or")
     return &f_or;
   if (name == "and")

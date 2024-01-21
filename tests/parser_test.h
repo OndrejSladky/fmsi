@@ -27,15 +27,17 @@ TEST(PARSER, COMPUTE_MASK_PATH) {
   struct test_case {
     std::string fn;
     int k;
+    bool include_k;
     std::string want_result;
   };
   std::vector<test_case> tests = {
-      {"human.fa", 31, "human.fa.k31.mask"},
-      {"bombyx.fa.xz", 8, "bombyx.fa.xz.k8.mask"},
+      {"human.fa", 31, true, "human.fa.k31.mask"},
+      {"bombyx.fa.xz", 8, true, "bombyx.fa.xz.k8.mask"},
+      {"bombyx.fa.xz", 8, false, "bombyx.fa.xz.mask"},
   };
 
   for (auto t : tests) {
-    auto got_result = compute_mask_path(t.fn, t.k);
+    auto got_result = compute_mask_path(t.fn, t.k, t.include_k);
 
     EXPECT_EQ(got_result, t.want_result);
   }

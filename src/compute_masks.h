@@ -1,7 +1,6 @@
 #pragma once
 
 #include "mask.h"
-
 #include <stdexcept>
 
 /// Compute an l mask from k mask that represents the set of l-mers

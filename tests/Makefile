@@ -1,4 +1,4 @@
-.PHONY: all clean test
+.PHONY: all clean test integration-test
 
 CXX = g++
 CXXFLAGS= -g -Wall -Wno-unused-function -std=c++17 -O2 -g3
@@ -9,10 +9,14 @@ GTEST= googletest/googletest
 SRC= ../src
 
 
-all: test
+all: test integration-test
 
 test: ms-index-test
 	./ms-index-test
+
+integration-test: ./integration_test.sh
+	$(MAKE) -C ..
+	./integration_test.sh
 
 ms-index-test: $(wildcard *.cpp *.h *.hpp) gtest-all.o $(SRC)/$(wildcard *.cpp *.h *.hpp) $(SRC)/QSufSort.c
 	$(CXX) $(CXXFLAGS) -isystem $(GTEST)/include -I $(GTEST)/include  $(INCLUDES) main.cpp $(SRC)/QSufSort.c gtest-all.o -pthread -o $@ $(LIBS)

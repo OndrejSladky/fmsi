@@ -78,6 +78,6 @@ void write_superstring(std::string fn, std::string superstring) {
 }
 
 /// Get the path where to store the mask.
-inline std::string compute_mask_path(std::string &fn, int k) {
-  return fn + ".k" + std::to_string(k) + ".mask";
+inline std::string compute_mask_path(std::string &fn, int k, bool include_k) {
+  return fn + (include_k ? ".k" + std::to_string(k) : "") + ".mask";
 }
