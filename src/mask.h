@@ -33,27 +33,6 @@ mask_t bw_inverse_mask(const qsint_t *inverse_suffix_array,
   return result;
 }
 
-bw_mask_t bw_transform_mask(fm_index_t &fm_index, mask_t &mask) {
-  auto bw_mask = sdsl::bit_vector(mask.size() + 1);
-  for (size_t i = 0; i < mask.size(); ++i) {
-    size_t index = fm_index[i];
-    int value = index == mask.size() ? 0 : mask[index];
-    bw_mask[i] = value;
-  }
-  return {bw_mask};
-}
-
-/// Restore the original mask.
-mask_t bw_inverse_mask(fm_index_t &fm_index, bw_mask_t &bw_mask) {
-  mask_t mask = mask_t(bw_mask.size() - 1);
-  for (size_t i = 0; i < bw_mask.size(); ++i) {
-    size_t index = fm_index[i];
-    if (index < mask.size())
-      mask[fm_index[i]] = bw_mask[i];
-  }
-  return mask;
-}
-
 /// Copy elements from the source mask to the destination mask.
 void merge_masks(mask_t &destination, mask_t &source) {
   destination.reserve(destination.size() + source.size());

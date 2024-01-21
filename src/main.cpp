@@ -196,18 +196,23 @@ int ms_index(int argc, char *argv[]) {
     return usage_index();
   }
 
+  std::cerr << "Starting " << fn << std::endl;
   std::string superstring_path = fn + ".sstr";
   auto ms = read_masked_superstring(fn);
+  std::cerr << "Read masked superstring" << std::endl;
   // If k is not set, infer it assuming the standard format of the mask.
   if (!k)
     k = infer_k(ms.mask);
   write_superstring(superstring_path, ms.superstring);
   // Construct the BW-transformed masks.
   auto bw_transformed_masks = construct_bw_transformed_masks(ms, k, ls);
+  std::cerr << "Transformed mask" << std::endl;
   // Construct the FM-index.
   fm_index_t fm_index;
   sdsl::construct(fm_index, superstring_path, 1);
+  std::cerr << "Constructed FM-index" << std::endl;
   dump_index_and_masks(fn, fm_index, bw_transformed_masks);
+  std::cerr << "Stored relevant files" << std::endl;
   // Clean the not needed superstring file.
   std::filesystem::remove(superstring_path);
   return 0;
@@ -436,12 +441,14 @@ int ms_normalize(int argc, char *argv[]) {
     return 0;
   }
 
+  std::cerr << "Starting " << fn << std::endl;
   fm_index_t fm_index;
   bw_mask_t mask;
   if (!load_index_pair(fn, k, fm_index, mask))
     return usage_normalize();
 
   auto klcp = mask_restore(fn + ".klcp");
+  std::cerr << "Loaded " << fn << std::endl;
   sdsl::bit_vector plain_mask(mask.size());
   for (size_t i = 0; i < mask.size(); ++i) {
     plain_mask[i] = mask[i];
@@ -455,6 +462,7 @@ int ms_normalize(int argc, char *argv[]) {
     auto original_mask = construct_inverse_mask(superstring, mask);
     masked_superstring = normalize(superstring, original_mask, k, f);
   }
+  std::cerr << "Normalized" << std::endl;
 
   if (only_print) {
     print_masked_superstring(masked_superstring);
@@ -466,11 +474,14 @@ int ms_normalize(int argc, char *argv[]) {
   // Construct the BW-transformed masks.
   auto bw_transformed_masks =
       construct_bw_transformed_masks(masked_superstring, k, {});
+  std::cerr << "Transformed mask" << std::endl;
   // Construct the FM-index.
   fm_index_t fm_index_normalized;
   sdsl::construct(fm_index_normalized, superstring_path, 1);
+  std::cerr << "Constructed FM-index" << std::endl;
 
   dump_index_and_masks(fn, fm_index_normalized, bw_transformed_masks);
+  std::cerr << "Stored relevant files" << std::endl;
   // Clean the not needed superstring file.
   std::filesystem::remove(superstring_path);
   return 0;
@@ -508,6 +519,7 @@ int ms_clean(int argc, char *argv[]) {
   for (int k = 1; k < 64; ++k) {
     std::filesystem::remove(compute_mask_path(fn, k, true));
   }
+  std::cerr << "Cleaned " << fn << std::endl;
   return 0;
 }
 
