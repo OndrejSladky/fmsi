@@ -52,7 +52,8 @@ void count_k_mers(camel::kh_S64_t *k_mers, std::string superstring, mask_t mask,
   camel::kh_destroy_OCC64(ones_occ);
 }
 
-/// Return the masked superstring corresponding to the given masked-cased representation.
+/// Return the masked superstring corresponding to the given masked-cased
+/// representation.
 masked_superstring_t separate_mask_and_superstring(std::string superstring) {
   masked_superstring_t ret;
   ret.mask = mask_t(superstring.size());
@@ -65,7 +66,8 @@ masked_superstring_t separate_mask_and_superstring(std::string superstring) {
   return ret;
 }
 
-/// Greedily compute a masked superstring with the same represented set as the input.
+/// Greedily compute a masked superstring with the same represented set as the
+/// input.
 masked_superstring_t normalize(std::string superstring, mask_t mask, int k,
                                assignable_function_t f) {
   camel::kh_S64_t *k_mers = camel::kh_init_S64();

@@ -17,15 +17,16 @@
 #include <unistd.h>
 
 static int usage() {
-  std::cerr
-      << "MS-Index is a tool for efficient indexing of Masked Superstrings."
-      << std::endl;
+  std::cerr << "MSI is a tool for efficient indexing of Masked Superstrings."
+            << std::endl;
   std::cerr << std::endl << "The recognized commands are:" << std::endl;
   std::cerr << "  `index` - Creates a BWT based index of the given masked "
                "superstring."
             << std::endl;
   std::cerr << "  `query` - Queries a $k$-mer against an index." << std::endl;
   std::cerr << "  `clean` - Cleans the files stored for index." << std::endl;
+  std::cerr << "  `merge` - Merges several indices." << std::endl;
+  std::cerr << "  `normalize` - Normalizes the given index." << std::endl;
   std::cerr << "  `-v`    - Prints the version of the program." << std::endl;
   std::cerr << "  `-h`    - Prints this help." << std::endl;
   return 1;
@@ -138,6 +139,7 @@ static int usage_normalize() {
                "$k$-mer represented when its number of set occurrences is "
                "between X and Y (inclusive)."
             << std::endl;
+  std::cerr << "  `-l` - Use local algorithm instead of global." << std::endl;
   std::cerr << "  `-d` - Value of d_max. Default 5." << std::endl;
   std::cerr << "  `-s` - Only print the masked superstring and do not "
                "normalize the FM-index"
