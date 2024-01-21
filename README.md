@@ -1,6 +1,6 @@
-# MS Index
+# MSI
 
-MS Index provides an efficient implementation of a BWT based indexing tool for
+MSI provides an efficient implementation of a BWT based indexing tool for
 [masked superstrings](https://doi.org/10.1101/2023.02.01.526717).
 
 ## How to install
@@ -15,7 +15,7 @@ Compile the program by running `make`.
 
 ## How to run
 
-To run the tool, run `./ms-index [command]`
+To run the tool, run `./msi [command]`
 
 The recognized commands are:
 
