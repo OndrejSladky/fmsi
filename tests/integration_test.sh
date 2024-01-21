@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 BIN=bin
-PROG=../ms-index
+PROG=../msi
 TESTS=testfiles
 
 mkdir -p $BIN

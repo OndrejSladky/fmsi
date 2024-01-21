@@ -11,19 +11,19 @@ SRC= ../src
 
 all: test integration-test
 
-test: ms-index-test
-	./ms-index-test
+test: msi-test
+	./msi-test
 
 integration-test: ./integration_test.sh
 	$(MAKE) -C ..
 	./integration_test.sh
 
-ms-index-test: $(wildcard *.cpp *.h *.hpp) gtest-all.o $(SRC)/$(wildcard *.cpp *.h *.hpp) $(SRC)/QSufSort.c
+msi-test: $(wildcard *.cpp *.h *.hpp) gtest-all.o $(SRC)/$(wildcard *.cpp *.h *.hpp) $(SRC)/QSufSort.c
 	$(CXX) $(CXXFLAGS) -isystem $(GTEST)/include -I $(GTEST)/include  $(INCLUDES) main.cpp $(SRC)/QSufSort.c gtest-all.o -pthread -o $@ $(LIBS)
 
 gtest-all.o: $(GTEST)/src/gtest-all.cc
 	$(CXX) $(CXXFLAGS) -isystem $(GTEST)/include -I $(GTEST)/include -I $(GTEST) -DGTEST_CREATE_SHARED_LIBRARY=1 -c -pthread $(GTEST)/src/gtest-all.cc -o $@
 
 clean:
-	rm -f ms-index-test
+	rm -f msi-test
 	rm -f gtest-all.o
