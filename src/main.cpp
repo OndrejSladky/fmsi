@@ -201,6 +201,13 @@ int ms_index(int argc, char *argv[]) {
   std::cerr << "Starting " << fn << std::endl;
   std::string superstring_path = fn + ".sstr";
   auto ms = read_masked_superstring(fn);
+  if (ms.superstring.size() == 0) {
+    std::cerr << "The file '" << fn
+              << "' is in incorrect format. It is supposed to be a fasta file "
+                 "with a single entry, the masked superstring"
+              << std::endl;
+    return usage_index();
+  }
   std::cerr << "Read masked superstring" << std::endl;
   // If k is not set, infer it assuming the standard format of the mask.
   if (!k)
