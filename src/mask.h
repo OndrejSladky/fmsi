@@ -11,7 +11,7 @@ typedef std::vector<bool> mask_t;
 typedef sdsl::rrr_vector<63> bw_mask_t;
 typedef sdsl::rank_support_rrr<1, 63> bw_mask_rank_t;
 // TODO: find the best set of constants.
-typedef sdsl::csa_wt<sdsl::wt_huff<sdsl::rrr_vector<127>>, 512, 1024>
+typedef sdsl::csa_wt<sdsl::wt_huff<sdsl::rrr_vector<63>>, 256, 2048>
     fm_index_t;
 
 /// Compute the mask in suffix array coordinates.
