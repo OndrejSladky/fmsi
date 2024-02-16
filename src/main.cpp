@@ -318,6 +318,7 @@ int ms_query(int argc, char *argv[]) {
     } else {
       //found = query_f(fm_index, mask, rank, f, kmer.size());
       // PV: workaround to speed up queries (I don't like this explicit inlining, but it's MUCH MUCH faster than the function call above
+      // TODO: improve the code quality here
       size_t total = 0;
       size_t ones = 0;
       auto rc = reverse_complement(kmer);
