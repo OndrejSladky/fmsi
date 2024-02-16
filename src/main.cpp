@@ -335,8 +335,6 @@ int ms_query(int argc, char *argv[]) {
         total += count_rc;
         ones += rank(to + 1) - rank(from);
       }
-      std::cerr << "Set occurrences: " << ones << std::endl
-                << "Total occurrences: " << total << std::endl;
       found = f(ones, total);//kmer.size() > 0;
     }
     if (found)
