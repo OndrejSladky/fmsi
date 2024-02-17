@@ -30,7 +30,7 @@ bool query(fm_index_t fm_index, bw_mask_t mask, std::string kmer) {
 /// If the k-mer appears in the superstring, determine its presence from
 /// the total number of occurrences, the number of set occurrences via
 /// the provided function f.
-bool query_f(fm_index_t fm_index, bw_mask_t mask, bw_mask_rank_t rank,
+inline bool query_f(fm_index_t fm_index, bw_mask_t mask, bw_mask_rank_t rank,
              assignable_function_t f, std::string kmer) {
   size_t total = 0;
   size_t ones = 0;
@@ -47,7 +47,5 @@ bool query_f(fm_index_t fm_index, bw_mask_t mask, bw_mask_rank_t rank,
     total += count_rc;
     ones += rank(to + 1) - rank(from);
   }
-  std::cerr << "Set occurrences: " << ones << std::endl
-            << "Total occurrences: " << total << std::endl;
   return f(ones, total);
 }
