@@ -303,6 +303,8 @@ int ms_query(int argc, char *argv[]) {
 
   std::ifstream query_file(query_fn);
   std::string kmer;
+  
+  bw_mask_rank_t rank(&mask);
   while (query_file >> kmer) {
     if (kmer.size() != size_t(k)) {
       std::cerr << "Skipped - size of queried k-mer " << kmer.size()
@@ -314,8 +316,27 @@ int ms_query(int argc, char *argv[]) {
     if (f == nullptr) {
       found = query(fm_index, mask, kmer);
     } else {
-      bw_mask_rank_t rank(&mask);
-      found = query_f(fm_index, mask, rank, f, kmer);
+      //found = query_f(fm_index, mask, rank, f, kmer.size());
+      // PV: workaround to speed up queries (I don't like this explicit inlining, but it's MUCH MUCH faster than the function call above
+      // TODO: improve the code quality here
+      size_t total = 0;
+      size_t ones = 0;
+      auto rc = reverse_complement(kmer);
+      fm_index_t::size_type from, to;
+      total += sdsl::backward_search(fm_index, 0, fm_index.size() - 1, kmer.begin(),
+                                     kmer.end(), from, to);
+      if (total) {
+        ones += rank(to + 1) - rank(from);
+      }
+      //auto count_rc = sdsl::backward_searchRC(fm_index, 0, fm_index.size() - 1,
+      //                                        kmer.begin(), kmer.end(), from, to);
+      auto count_rc = sdsl::backward_search(fm_index, 0, fm_index.size() - 1,
+                                            rc.begin(), rc.end(), from, to);
+      if (count_rc) {
+        total += count_rc;
+        ones += rank(to + 1) - rank(from);
+      }
+      found = f(ones, total);//kmer.size() > 0;
     }
     if (found)
       std::cout << "FOUND" << std::endl;

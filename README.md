@@ -1,23 +1,27 @@
-# MSI
+# FMSI ($f$-Masked Superstring Index)
 
-MSI provides an experimental implementation of a BWT based indexing tool for
+MFSI provides an experimental implementation of a BWT based indexing tool for
 [masked superstrings](https://doi.org/10.1101/2023.02.01.526717).
 
 It is provided under the MIT license (see LICENSE file).
+
+## How to cite
+
+Coming soon!
 
 ## How to install
 
 First clone the repo and its dependencies:
 
 ```
-git clone --recursive git@github.com:OndrejSladky/ms-index.git
+git clone --recursive git@github.com:OndrejSladky/fmsi.git
 ```
 
 Compile the program by running `make`.
 
 ## How to run
 
-To run the tool, run `./msi [command]`
+To run the tool, run `./fmsi [command]`
 
 The recognized commands are:
 
@@ -30,17 +34,17 @@ The recognized commands are:
 
 ### Index
 
-Index (`./msi index`) recognizes the following arguments:
+Index (`./fmsi index`) recognizes the following arguments:
 
 - `-p path_to_fasta` - The path to the fasta file with masked superstring to be indexed. This is a required argument.
 - `-k value_of_k`    - The size of one k-mer. If not provided k is computed from the masked superstring under the assumption that the last run of zeros has length k-1.
 
-For example: `./msi index -p spneumoniae.fa -k 13` 
+For example: `./fmsi index -p spneumoniae.fa -k 13` 
 
 ### Query
 
-Query (`./msi query`) returns whether the provided $k$-mer is in the masked superstring or not.
-Note that `./msi index` must be run on the provided fasta file beforehand.
+Query (`./fmsi query`) returns whether the provided $k$-mer is in the masked superstring or not.
+Note that `./fmsi index` must be run on the provided fasta file beforehand.
 
 It recognizes the following arguments:
 
@@ -56,13 +60,13 @@ The recognized functions are following:
   - `xor` - Consider $k$-mer represented when an odd number of occurrences is set.
   - `X-Y` (where X and Y can be any integers) - Consider $k$-mer represented when its number of set occurrences is between X and Y (inclusive).
 
-For example: `./ms-index query -p spneumoniae.fa -f xor ACGT`
+For example: `./fmsi query -p spneumoniae.fa -f xor ACGT`
 
 ### Merge
 
-Merge (`./ms-index merge`) creates a single index from several indexes representing the concatenation of the
+Merge (`./fmsi merge`) creates a single index from several indexes representing the concatenation of the
 corresponding masked superstrings.
-Note that `./msi index` must be run on the provided fasta files beforehand.
+Note that `./fmsi index` must be run on the provided fasta files beforehand.
 
 It recognizes the following arguments:
 
@@ -70,11 +74,11 @@ It recognizes the following arguments:
 - `-r path_to_result` - The path to the file where the result will be stored. Required.
 - `-k value_of_k`    - The size of one k-mer.
 
-For example: `./ms-index merge -p spneumoniae1.fa -p spneumoniae2.fa -r spneumoniae.fa -k 13`
+For example: `./fmsi merge -p spneumoniae1.fa -p spneumoniae2.fa -r spneumoniae.fa -k 13`
 
 ### Normalize
 
-Normalize (`./ms-index normalize`) normalizes the index by removing the redundant information by computing a new or-masked superstring.
+Normalize (`./fmsi normalize`) normalizes the index by removing the redundant information by computing a new or-masked superstring.
 Especially note that the resulting superstring is or-masked superstring and not f-masked superstring.
 
 It recognizes the following arguments:
@@ -92,16 +96,16 @@ It recognizes the following arguments:
 - `-l`                - Use the local algorithm acting directly on the index.
 - `-d value_of_d_max` - The maximum extension length. Relevant only for the local algorithm. Default is 5.
 
-For example: `./ms-index normalize -p spneumoniae.fa -k 13 -f xor -s`
+For example: `./fmsi normalize -p spneumoniae.fa -k 13 -f xor -s`
 
 ### Clean
 
-Clean (`./ms-index clean`) recognizes the following arguments:
+Clean (`./fmsi clean`) recognizes the following arguments:
 
 - `-p path_to_fasta` - The path to the fasta from which the index was created. This is a required argument.
 
 
-## How to test
+## How to run unittests
 
 To run the associated tests, simply run `make test`.
 
