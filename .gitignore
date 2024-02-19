@@ -1,4 +1,5 @@
-ms-index.dSYM/
+fmsi
+tests/fmsi-test
 
 src/version.h
 tests/bin/
