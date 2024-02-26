@@ -1,6 +1,6 @@
 # FMSI ($f$-Masked Superstring Index)
 
-MFSI provides an experimental implementation of a BWT based indexing tool for
+FMSI provides an experimental implementation of a BWT based indexing tool for
 [masked superstrings](https://doi.org/10.1101/2023.02.01.526717).
 
 It is provided under the MIT license (see LICENSE file).
