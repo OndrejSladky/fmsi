@@ -31,20 +31,27 @@ void count_k_mers(camel::kh_S64_t *k_mers, std::string superstring, mask_t mask,
     k_mer &= k_mer_mask;
     auto canonical_k_mer = std::min(k_mer, camel::ReverseComplement(k_mer, k));
     int total = 0, ones = 0;
-    int ret;
-    camel::khiter_t it = kh_put_OCC64(total_occ, canonical_k_mer, &ret);
-    total = kh_val(total_occ, it);
-    kh_value(total_occ, it) = total + 1;
-    if (mask[i]) {
-      it = kh_put_OCC64(ones_occ, canonical_k_mer, &ret);
-      ones = kh_val(ones_occ, it);
-      kh_value(ones_occ, it) = ones + 1;
+      int ret;
+    camel::khiter_t it = camel::kh_get_OCC64(total_occ, canonical_k_mer);
+    if (it == kh_end(total_occ)) {
+        it = camel::kh_put_OCC64(total_occ, canonical_k_mer, &ret);
+    } else {
+        total = kh_val(total_occ, it);
     }
-    bool contained = containsKMer(k_mers, k_mer, k, true);
+    kh_value(total_occ, it) = ++total;
+      it = camel::kh_get_OCC64(ones_occ, canonical_k_mer);
+    if (it == kh_end(ones_occ)) {
+        it = camel::kh_put_OCC64(ones_occ, canonical_k_mer, &ret);
+    } else {
+        ones = kh_val(ones_occ, it);
+    }
+    ones += mask[i];
+    kh_value(ones_occ, it) = ones;
+    bool contained = containsKMer(k_mers, canonical_k_mer, k, true);
     if (f(ones, total) && !contained) {
-      kh_put_S64(k_mers, k_mer, &ret);
+      kh_put_S64(k_mers, canonical_k_mer, &ret);
     } else if (!f(ones, total) && contained) {
-      eraseKMer(k_mers, k_mer, k, true);
+      eraseKMer(k_mers, canonical_k_mer, k, true);
     }
   }
 
