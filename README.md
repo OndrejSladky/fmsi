@@ -29,6 +29,7 @@ The recognized commands are:
 - `query` Queries a $k$-mer against an index.
 - `merge` Merge several indexes.
 - `normalize` Normalize an index.
+- `export` Export the underlying masked superstring.
 - `clean` Cleans the files stored for index.
 - `-v`    Prints the version of the program.
 
@@ -97,6 +98,13 @@ It recognizes the following arguments:
 - `-d value_of_d_max` - The maximum extension length. Relevant only for the local algorithm. Default is 5.
 
 For example: `./fmsi normalize -p spneumoniae.fa -k 13 -f xor -s`
+
+### Export
+
+Export (`./fmsi export`) recognizes the following arguments:
+
+- `-p path_to_fasta` - The path to the fasta from which the index was created. This is a required argument.
+
 
 ### Clean
 

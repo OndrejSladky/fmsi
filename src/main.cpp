@@ -17,7 +17,7 @@
 #include <unistd.h>
 
 static int usage() {
-  std::cerr << "MSI is a tool for efficient indexing of Masked Superstrings."
+  std::cerr << "FMSI is a tool for efficient indexing of Masked Superstrings."
             << std::endl;
   std::cerr << std::endl << "The recognized commands are:" << std::endl;
   std::cerr << "  `index` - Creates a BWT based index of the given masked "
@@ -27,6 +27,7 @@ static int usage() {
   std::cerr << "  `clean` - Cleans the files stored for index." << std::endl;
   std::cerr << "  `merge` - Merges several indices." << std::endl;
   std::cerr << "  `normalize` - Normalizes the given index." << std::endl;
+    std::cerr << "  `export` - Export the underlying masked superstring." << std::endl;
   std::cerr << "  `-v`    - Prints the version of the program." << std::endl;
   std::cerr << "  `-h`    - Prints this help." << std::endl;
   return 1;
@@ -34,7 +35,7 @@ static int usage() {
 
 static int usage_index() {
   std::cerr
-      << "MS-Index Index creates the index for a given masked superstring."
+      << "FMSI Index creates the index for a given masked superstring."
       << std::endl;
   std::cerr << std::endl << "The recognized arguments are:" << std::endl;
   std::cerr << "  `-p path_to_fasta` - The path to the fasta file with masked "
@@ -54,7 +55,7 @@ static int usage_index() {
 }
 
 static int usage_merge() {
-  std::cerr << "MS-Index Merge merges several indices." << std::endl;
+  std::cerr << "FMSI Merge merges several indices." << std::endl;
   std::cerr << std::endl << "The recognized arguments are:" << std::endl;
   std::cerr << "  `-p path_to_fasta`  - The path to the fasta file which "
                "should be merged. Can be provided multiple times. It is "
@@ -70,7 +71,7 @@ static int usage_merge() {
 }
 
 static int usage_query() {
-  std::cerr << "MS-Index Query return whether the provided $k$-mer is in the "
+  std::cerr << "FMSI Query return whether the provided $k$-mer is in the "
                "masked superstring or not."
             << std::endl;
   std::cerr
@@ -110,7 +111,7 @@ static int usage_query() {
 }
 
 static int usage_normalize() {
-  std::cerr << "MS-Index Normalize normalizes the given FM-index so that it "
+  std::cerr << "FMSI Normalize normalizes the given FM-index so that it "
                "does not occupy more space than needed."
             << std::endl;
   std::cerr << std::endl << "The recognized arguments are:" << std::endl;
@@ -148,9 +149,20 @@ static int usage_normalize() {
   return 1;
 }
 
+static int usage_export() {
+    std::cerr << "FMSI Export exports the indexed masked superstring to its string form."
+              << std::endl;
+    std::cerr << std::endl << "The recognized arguments are:" << std::endl;
+    std::cerr << "  `-p path_to_fasta` - The path to the fasta file from which "
+                 "the index was created. Required."
+              << std::endl;
+    std::cerr << "  `-h` - Prints this help and terminates." << std::endl;
+    return 1;
+}
+
 static int usage_clean() {
   std::cerr
-      << "MS-Index Index creates the index for a given masked superstring."
+      << "FMSI Index creates the index for a given masked superstring."
       << std::endl;
   std::cerr << std::endl << "The recognized arguments are:" << std::endl;
   std::cerr << "  `-p path_to_fasta` - The path to the fasta file with masked "
@@ -415,7 +427,7 @@ int ms_merge(int argc, char *argv[]) {
 }
 
 void print_masked_superstring(masked_superstring_t ms) {
-  std::cout << "> normalized masked superstring" << std::endl;
+  std::cout << "> masked superstring" << std::endl;
   for (size_t i = 0; i < ms.superstring.size(); ++i) {
     if (ms.mask[i])
       std::cout << ms.superstring[i];
@@ -517,6 +529,39 @@ int ms_normalize(int argc, char *argv[]) {
   return 0;
 }
 
+int ms_export(int argc, char *argv[]) {
+    bool usage = false;
+    int c;
+    std::string fn;
+    while ((c = getopt(argc, argv, "p:h")) >= 0) {
+        switch (c) {
+            case 'h':
+                usage = true;
+                break;
+            case 'p':
+                fn = optarg;
+                break;
+            default:
+                return usage_export();
+        }
+    }
+    if (usage) {
+        usage_export();
+        return 0;
+    }
+
+    fm_index_t fm_index;
+    bw_mask_t mask;
+    // TODO: generalize this for multi-k masks.
+    if (!load_index_pair(fn, 0, fm_index, mask))
+        return usage_normalize();
+
+    auto superstring = sdsl::extract(fm_index, 0, fm_index.size() - 2);
+    auto original_mask = construct_inverse_mask(superstring, mask);
+    print_masked_superstring({original_mask, superstring});
+    return 0;
+}
+
 int ms_clean(int argc, char *argv[]) {
   bool usage = false;
   int c;
@@ -567,6 +612,8 @@ int main(int argc, char *argv[]) {
     ret = ms_merge(argc - 1, argv + 1);
   else if (strcmp(argv[1], "normalize") == 0)
     ret = ms_normalize(argc - 1, argv + 1);
+  else if (strcmp(argv[1], "export") == 0)
+      ret = ms_export(argc - 1, argv + 1);
   else if (strcmp(argv[1], "-v") == 0)
     return version();
   else if (strcmp(argv[1], "-h") == 0) {

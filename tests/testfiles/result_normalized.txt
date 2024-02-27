@@ -1,2 +1,2 @@
-> normalized masked superstring
+> masked superstring
 TAcAcg
