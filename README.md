@@ -1,7 +1,11 @@
 # FMSI ($f$-Masked Superstring Index)
 
-FMSI provides an experimental implementation of a BWT based indexing tool for
-[masked superstrings](https://doi.org/10.1101/2023.02.01.526717).
+FMSI provides an experimental implementation of FMS-index - a BWT based indexing tool for
+$f$-masked superstrings, which enables to ask membership queries and perform set operations on the
+$k$-mer sets represented by the masked superstrings.
+
+The implementation is based on the [SDSL library](https://github.com/simongog/sdsl-lite).
+
 
 It is provided under the MIT license (see LICENSE file).
 
