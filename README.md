@@ -28,7 +28,7 @@ The recognized commands are:
 - `index` Creates a BWT based index of the given masked superstring.
 - `query` Queries a $k$-mer against an index.
 - `merge` Merge several indexes.
-- `normalize` Normalize an index.
+- `compact` Compacts an index.
 - `export` Export the underlying masked superstring.
 - `clean` Cleans the files stored for index.
 - `-v`    Prints the version of the program.
@@ -77,9 +77,9 @@ It recognizes the following arguments:
 
 For example: `./fmsi merge -p spneumoniae1.fa -p spneumoniae2.fa -r spneumoniae.fa -k 13`
 
-### Normalize
+### Compact
 
-Normalize (`./fmsi normalize`) normalizes the index by removing the redundant information by computing a new or-masked superstring.
+Compact (`./fmsi compacts`) compacts the index by removing the redundant information by computing a new or-masked superstring.
 Especially note that the resulting superstring is or-masked superstring and not f-masked superstring.
 
 It recognizes the following arguments:
@@ -97,7 +97,7 @@ It recognizes the following arguments:
 - `-l`                - Use the local algorithm acting directly on the index.
 - `-d value_of_d_max` - The maximum extension length. Relevant only for the local algorithm. Default is 5.
 
-For example: `./fmsi normalize -p spneumoniae.fa -k 13 -f xor -s`
+For example: `./fmsi compact -p spneumoniae.fa -k 13 -f xor -s`
 
 ### Export
 

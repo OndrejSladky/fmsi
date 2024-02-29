@@ -26,7 +26,7 @@ static int usage() {
   std::cerr << "  `query` - Queries a $k$-mer against an index." << std::endl;
   std::cerr << "  `clean` - Cleans the files stored for index." << std::endl;
   std::cerr << "  `merge` - Merges several indices." << std::endl;
-  std::cerr << "  `normalize` - Normalizes the given index." << std::endl;
+  std::cerr << "  `compact` - Compacts the given index." << std::endl;
     std::cerr << "  `export` - Export the underlying masked superstring." << std::endl;
   std::cerr << "  `-v`    - Prints the version of the program." << std::endl;
   std::cerr << "  `-h`    - Prints this help." << std::endl;
@@ -75,7 +75,7 @@ static int usage_query() {
                "masked superstring or not."
             << std::endl;
   std::cerr
-      << "`./ms-index index` must be run on the provided fasta file beforehand."
+      << "`./fmsi index` must be run on the provided fasta file beforehand."
       << std::endl;
   std::cerr << std::endl << "The recognized arguments are:" << std::endl;
   std::cerr << "  `-p path_to_fasta` - The path to the fasta file from which "
@@ -111,7 +111,7 @@ static int usage_query() {
 }
 
 static int usage_normalize() {
-  std::cerr << "FMSI Normalize normalizes the given FM-index so that it "
+  std::cerr << "FMSI Compact compacts the given index so that it "
                "does not occupy more space than needed."
             << std::endl;
   std::cerr << std::endl << "The recognized arguments are:" << std::endl;
@@ -143,7 +143,7 @@ static int usage_normalize() {
   std::cerr << "  `-l` - Use local algorithm instead of global." << std::endl;
   std::cerr << "  `-d` - Value of d_max. Default 5." << std::endl;
   std::cerr << "  `-s` - Only print the masked superstring and do not "
-               "normalize the FM-index"
+               "compact the index"
             << std::endl;
   std::cerr << "  `-h` - Prints this help and terminates." << std::endl;
   return 1;
@@ -253,7 +253,7 @@ bool load_index_pair(std::string fn, int k, fm_index_t &ret_fm_index,
       !std::filesystem::exists(std::filesystem::path{index_path})) {
     std::cerr << "The index for file " << fn << " and k=" << std::to_string(k)
               << " is not properly created." << std::endl;
-    std::cerr << "Please run `./ms-index index` before." << std::endl;
+    std::cerr << "Please run `./fmsi index` before." << std::endl;
     return false;
   }
   // Load FM-index.
@@ -610,7 +610,8 @@ int main(int argc, char *argv[]) {
     ret = ms_clean(argc - 1, argv + 1);
   else if (strcmp(argv[1], "merge") == 0)
     ret = ms_merge(argc - 1, argv + 1);
-  else if (strcmp(argv[1], "normalize") == 0)
+  // Recognize "normalize" for backwards compatibility
+  else if (strcmp(argv[1], "normalize") == 0 || strcmp(argv[1], "compact") == 0)
     ret = ms_normalize(argc - 1, argv + 1);
   else if (strcmp(argv[1], "export") == 0)
       ret = ms_export(argc - 1, argv + 1);
