@@ -5,10 +5,10 @@ TESTS=testfiles
 
 mkdir -p $BIN
 
-$PROG index -p $TESTS/integration_a.fa -k 3
-$PROG index -p $TESTS/integration_b.fa -k 3
+$PROG index -p $TESTS/integration_a.fa
+$PROG index -p $TESTS/integration_b.fa
 
-$PROG merge -k 3 -p $TESTS/integration_a.fa -p $TESTS/integration_b.fa -r $BIN/merged.fa
+$PROG merge -p $TESTS/integration_a.fa -p $TESTS/integration_b.fa -r $BIN/merged.fa
 
 $PROG query -k 3 -p $TESTS/integration_a.fa -q $TESTS/queries.txt > $BIN/a.txt 2> /dev/null
 $PROG query -k 3 -p $TESTS/integration_a.fa -q $TESTS/queries.txt -f xor > $BIN/a_xor.txt 2> /dev/null

@@ -177,14 +177,10 @@ static int version() {
 int ms_index(int argc, char *argv[]) {
   int c;
   bool usage = false;
-  int k = 0;
   std::string fn;
   std::vector<int> ls;
-  while ((c = getopt(argc, argv, "p:k:l:h")) >= 0) {
+  while ((c = getopt(argc, argv, "p:l:h")) >= 0) {
     switch (c) {
-    case 'k':
-      k = atoi(optarg);
-      break;
     case 'l':
       ls.push_back(atoi(optarg));
       break;

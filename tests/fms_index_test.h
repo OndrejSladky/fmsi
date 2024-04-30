@@ -83,12 +83,21 @@ namespace {
             bool want_result;
         };
         std::vector<test_case> tests = {
-                {"A", false},
+                {"A", true},
+                {"AG", false},
                 {"CA", true},
                 {"GGTA", true},
+                {"ATGG", false},
                 {"GA", false},
                 {"GGG", false},
+                {"CC", true},
         };
+
+        for (auto t: tests) {
+            auto got_result = query(index, t.query, nullptr);
+
+            EXPECT_EQ(got_result, t.want_result);
+        }
     }
 
     TEST (FMS_INDEX, CONSTRUCT) {

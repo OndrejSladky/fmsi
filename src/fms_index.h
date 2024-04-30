@@ -83,10 +83,10 @@ void update_range(const fms_index& index, size_t& i, size_t& j, byte c) {
 }
 
 bool query(const fms_index& index, const std::string& pattern, demasking_function_t f) {
-    size_t i = 0;
-    size_t j = index.sa_transformed_mask.size();
-    for (char p : pattern) {
-        update_range(index, i, j, char_to_int(p));
+    size_t i = 0, i_rev = 0;
+    size_t j = index.sa_transformed_mask.size(), j_rev = index.sa_transformed_mask.size();
+    for (size_t k = pattern.size(); k > 0; --k) {
+        update_range(index, i, j, char_to_int(pattern[k-1]));
     }
     // Separately optimize or.
     if (f == nullptr) {
@@ -95,13 +95,37 @@ bool query(const fms_index& index, const std::string& pattern, demasking_functio
                 return true;
             }
         }
+    }
+    for (char p : pattern) {
+        update_range(index, i_rev, j_rev, 3 ^ char_to_int(p));
+    }
+    // Separately optimize or.
+    if (f == nullptr) {
+        for (size_t k = i_rev; k < j_rev; ++k) {
+            if (index.sa_transformed_mask[k]) {
+                return true;
+            }
+        }
         return false;
+    }
+    // Do not optimize code for k-mers that are their own reverse complement as they're not very common.
+    bool own_rc = true;
+    for (size_t k = 0; k < pattern.size(); ++k) {
+        if (char_to_int(pattern[k]) != (3 ^ char_to_int(pattern[pattern.size() - k - 1]))) {
+            own_rc = false;
+            break;
+        }
     }
     size_t ones = 0;
     for (size_t k = i; k < j; ++k) {
         ones += index.sa_transformed_mask[k];
     }
-    return f((int)ones, (int)(j - i));
+    if (!own_rc) for (size_t k = i_rev; k < j_rev; ++k) {
+        ones += index.sa_transformed_mask[k];
+    }
+    size_t total = j - i + j_rev - i_rev;
+    if (own_rc) total = j - i;
+    return f((int)ones, (int)total);
 }
 
 qsint_t* convert_superstring(std::string ms) {

@@ -9,7 +9,7 @@ GTEST= googletest/googletest
 SRC= ../src
 
 
-all: test  integration-test
+all: test integration-test
 
 test: fmsi-test
 	./fmsi-test
