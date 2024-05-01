@@ -332,12 +332,12 @@ int ms_normalize(int argc, char *argv[]) {
   bool only_print = false;
   bool use_local = false;
   std::string fn;
-  std::function<bool(size_t, size_t)> f = mask_function("or");
+  std::function<bool(size_t, size_t)> f = mask_function("or", true);
   while ((c = getopt(argc, argv, "p:hk:d:f:sl")) >= 0) {
     switch (c) {
     case 'f':
       try {
-        f = mask_function(optarg);
+        f = mask_function(optarg, true);
       } catch (std::invalid_argument &) {
         std::cerr << "Function '" << optarg << "' not recognized." << std::endl;
         return usage_query();
@@ -369,6 +369,9 @@ int ms_normalize(int argc, char *argv[]) {
     usage_normalize();
     return 0;
   }
+
+  f(0,1);
+  f(1,3);
 
   std::cerr << "Starting " << fn << std::endl;
   fms_index index = load_index(fn);

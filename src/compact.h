@@ -4,6 +4,7 @@
 #include "fms_index.h"
 #include "parser.h"
 
+
 // Wrap up kmercamel in a namespace to avoid name conflicts.
 namespace camel {
 #include "kmercamel/src/global.h"

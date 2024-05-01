@@ -1,2 +1,2 @@
-> masked superstring
-TAcAcg
+>exported f-masked superstring
+CgTGta

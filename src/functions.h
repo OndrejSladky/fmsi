@@ -20,10 +20,12 @@ bool f_r_to_s(size_t ones, [[maybe_unused]] size_t total, size_t r, size_t s) {
 
 typedef std::function<bool(int, int)> demasking_function_t;
 /// Return the appropriate assignable function.
-demasking_function_t mask_function(std::string name) {
-  if (name == "or")
+demasking_function_t mask_function(std::string name, bool no_optimize = false) {
+  if (name == "or") {
+      if (no_optimize) return &f_or;
       // or is optimized in the query
-    return nullptr;
+      return nullptr;
+  }
   if (name == "and")
     return &f_and;
   if (name == "xor")

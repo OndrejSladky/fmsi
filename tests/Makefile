@@ -1,7 +1,7 @@
 .PHONY: all clean test integration-test
 
 CXX = g++
-CXXFLAGS= -g -Wall -Wno-unused-function -std=c++17 -O2 -g3
+CXXFLAGS= -g -Wall -Wno-unused-function -std=c++17 -O2
 INCLUDES-PATH?=../src
 INCLUDES=							-I$(INCLUDES-PATH)/include -L$(INCLUDES-PATH)/lib
 LIBS=									-lz -lsdsl -ldivsufsort -ldivsufsort64
