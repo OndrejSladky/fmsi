@@ -1,8 +1,9 @@
 #pragma once
 
 #include "functions.h"
-#include "mask.h"
+#include "fms_index.h"
 #include "parser.h"
+
 
 // Wrap up kmercamel in a namespace to avoid name conflicts.
 namespace camel {
@@ -15,8 +16,8 @@ KHASH_MAP_INIT_INT64(OCC64, int)
 #include <string>
 
 /// Fill in kMers with the represented k-mers in the given superstring under f.
-void count_k_mers(camel::kh_S64_t *k_mers, std::string superstring, mask_t mask,
-                  int k, assignable_function_t f) {
+void count_k_mers(camel::kh_S64_t *k_mers, std::string superstring, std::vector<bool> mask,
+                  int k, demasking_function_t f) {
   camel::kmer_t k_mer = 0;
   camel::kmer_t k_mer_mask = 1LL << (2 * k - 1);
   k_mer_mask |= k_mer_mask - 1;
@@ -61,23 +62,22 @@ void count_k_mers(camel::kh_S64_t *k_mers, std::string superstring, mask_t mask,
 
 /// Return the masked superstring corresponding to the given masked-cased
 /// representation.
-masked_superstring_t separate_mask_and_superstring(std::string superstring) {
-  masked_superstring_t ret;
-  ret.mask = mask_t(superstring.size());
-  ret.superstring = std::string(superstring.size(), 'N');
-  for (size_t i = 0; i < superstring.size(); ++i) {
-    char c = superstring[i];
-    ret.mask[i] = _isupper(c);
-    ret.superstring[i] = _toupper(c);
+std::pair<std::vector<bool>, std::string> separate_mask_and_superstring(std::string ms) {
+  auto mask = std::vector<bool>(ms.size());
+  auto superstring = std::string(ms.size(), 'N');
+  for (size_t i = 0; i < ms.size(); ++i) {
+    char c = ms[i];
+    mask[i] = is_upper(c);
+    superstring[i] = _toupper(c);
   }
-  return ret;
+  return {mask, superstring};
 }
 
 /// Greedily compute a masked superstring with the same represented set as the
 /// input.
-masked_superstring_t normalize(std::string superstring, mask_t mask, int k,
-                               assignable_function_t f) {
+std::string normalize(std::string ms, int k, demasking_function_t f) {
   camel::kh_S64_t *k_mers = camel::kh_init_S64();
+  auto [mask, superstring] = separate_mask_and_superstring(ms);
   count_k_mers(k_mers, superstring, mask, k, f);
   std::stringstream ss;
   auto k_mer_vec = kMersToVec(k_mers);
@@ -86,5 +86,5 @@ masked_superstring_t normalize(std::string superstring, mask_t mask, int k,
   camel::Global(k_mer_vec, ss, k, true);
 
   kh_destroy_S64(k_mers);
-  return separate_mask_and_superstring(ss.str());
+  return ss.str();
 }

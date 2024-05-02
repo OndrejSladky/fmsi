@@ -16,11 +16,6 @@ include/sdsl/suffix_arrays.hpp: sdsl-lite/build/Makefile
 sdsl-lite/build/Makefile:
 	cd sdsl-lite/build && cmake -DCMAKE_VERBOSE_MAKEFILE=ON -DCMAKE_INSTALL_PREFIX=../.. ..
 
-clean:
-	rm -f $(PROG)
-	rm -f version.h
-	$(MAKE) -C sdsl-lite/build/ clean
-
 
 $(PROG): $(wildcard *.cpp *.c *.h) ./include/sdsl/suffix_arrays.hpp version.h
 	./create-version.sh
@@ -29,3 +24,8 @@ $(PROG): $(wildcard *.cpp *.c *.h) ./include/sdsl/suffix_arrays.hpp version.h
 version.h: version
 	./create-version.sh
 
+
+clean:
+	rm -f $(PROG)
+	rm -f version.h
+	$(MAKE) -C sdsl-lite/build/ clean

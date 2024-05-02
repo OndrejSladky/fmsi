@@ -1,2 +1,2 @@
-> masked superstring
+>exported f-masked superstring
 CgTGta
