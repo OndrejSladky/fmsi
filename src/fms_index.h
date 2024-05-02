@@ -77,6 +77,7 @@ byte access(const fms_index& index, size_t i) {
 }
 
 void update_range(const fms_index& index, size_t& i, size_t& j, byte c) {
+    if (j == i) return;
     auto count = index.counts[c];
     i = count + rank(index, i, c);
     j = count + rank(index, j, c);
