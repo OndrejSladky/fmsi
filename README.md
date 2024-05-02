@@ -11,7 +11,39 @@ It is provided under the MIT license (see LICENSE file).
 
 ## How to cite
 
-Coming soon!
+If you use FMSI in your research, please cite the following.
+
+> Ondřej Sladký, Pavel Veselý, and Karel Břinda: Function-Assigned Masked Superstrings as a Versatile and Compact Data Type for *k*-Mer Sets.
+> *bioRxiv* 2024.03.06.583483, 2024. [https://doi.org/10.1101/2024.03.06.583483](https://doi.org/10.1101/2024.03.06.583483)
+
+```
+@article {sladky2024-f-masked-superstrings,
+	author = {Ond{\v r}ej Sladk{\'y} and Pavel Vesel{\'y} and Karel B{\v r}inda},
+	title = {Function-Assigned Masked Superstrings as a Versatile and Compact Data Type for 𝑘-Mer Sets},
+	elocation-id = {2024.03.06.583483},
+	year = {2024},
+	doi = {10.1101/2024.03.06.583483},
+	publisher = {Cold Spring Harbor Laboratory},
+	URL = {https://www.biorxiv.org/content/early/2024/03/11/2024.03.06.583483},
+	eprint = {https://www.biorxiv.org/content/early/2024/03/11/2024.03.06.583483.full.pdf},
+	journal = {bioRxiv}
+}
+
+```
+
+> Ondřej Sladký, Pavel Veselý, and Karel Břinda: Masked superstrings as a unified framework for textual *k*-mer set representations. *bioRxiv* 2023.02.01.526717, 2023.
+[https://doi.org/10.1101/2023.02.01.526717](https://doi.org/10.1101/2023.02.01.526717)
+
+```
+@article{sladky2023-masked-superstrings,
+  title   = { Masked superstrings as a unified framework for textual $k$-mer set representations },
+  author  = { Sladk{\'y}, Ond{\v r}ej and Vesel{\'y}, Pavel and B{\v r}inda, Karel },
+  journal = { bioRxiv },
+  volume  = { 2023.02.01.526717 },
+  year    = { 2023 },
+  doi     = { 10.1101/2023.02.01.526717 }
+}
+```
 
 ## How to install
 
