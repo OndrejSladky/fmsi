@@ -37,14 +37,6 @@ static int usage_index() {
   std::cerr << "  `-p path_to_fasta` - The path to the fasta file with masked "
                "superstring to be indexed. This is a required argument."
             << std::endl;
-  std::cerr << "  `-k value_of_k`    - The size of one k-mer. If not provided "
-               "k is computed from the masked superstring under the assumption "
-               "that the last run of zeros has length k-1."
-            << std::endl;
-  std::cerr << "  `-l value_of_l`    - The size of l for which a mask is "
-               "computed from the mask for k. l should not be greater than k. "
-               "This argument can be provided multiple times."
-            << std::endl;
   std::cerr << "  `-h`               - Prints this help and terminates."
             << std::endl;
   return 1;
@@ -60,7 +52,6 @@ static int usage_merge() {
   std::cerr << "  `-r path_of_result` - The path where the result should be "
                "stored. This is a required argument."
             << std::endl;
-  std::cerr << "  `-k value_of_k`     - The size of one k-mer." << std::endl;
   std::cerr << "  `-h`                - Prints this help and terminates."
             << std::endl;
   return 1;
@@ -136,8 +127,6 @@ static int usage_normalize() {
                "$k$-mer represented when its number of set occurrences is "
                "between X and Y (inclusive)."
             << std::endl;
-  std::cerr << "  `-l` - Use local algorithm instead of global." << std::endl;
-  std::cerr << "  `-d` - Value of d_max. Default 5." << std::endl;
   std::cerr << "  `-s` - Only print the masked superstring and do not "
                "compact the index"
             << std::endl;
@@ -178,14 +167,19 @@ int ms_index(int argc, char *argv[]) {
   int c;
   bool usage = false;
   std::string fn;
-  std::vector<int> ls;
-  while ((c = getopt(argc, argv, "p:l:h")) >= 0) {
+  // For backwards compatibility.
+  bool l_param_set = false;
+  bool k_param_set = false;
+  while ((c = getopt(argc, argv, "p:l:hk:")) >= 0) {
     switch (c) {
     case 'l':
-      ls.push_back(atoi(optarg));
+      l_param_set = true;
       break;
     case 'h':
       usage = true;
+      break;
+    case 'k':
+      k_param_set = true;
       break;
     case 'p':
       fn = optarg;
@@ -201,6 +195,12 @@ int ms_index(int argc, char *argv[]) {
     std::cerr << "Path to the fasta file is a required argument." << std::endl;
     return usage_index();
   }
+  if (k_param_set) {
+    std::cerr << "WARNING: Parameter -k is ignored." << std::endl;
+  }
+  if (l_param_set) {
+      std::cerr << "WARNING: Parameter -l is ignored." << std::endl;
+  }
 
   std::cerr << "Starting " << fn << std::endl;
   std::string superstring_path = fn + ".sstr";
@@ -213,7 +213,6 @@ int ms_index(int argc, char *argv[]) {
     return usage_index();
   }
   std::cerr << "Read masked superstring" << std::endl;
-  // TODO: If k is not set, infer it assuming the standard format of the mask.
   fms_index index = construct(ms);
   std::cerr << "Constructed index" << std::endl;
   dump_index(index, fn);
@@ -291,7 +290,8 @@ int ms_merge(int argc, char *argv[]) {
   int c;
   std::vector<std::string> fns;
   std::string result_fn;
-  while ((c = getopt(argc, argv, "p:hr:")) >= 0) {
+  bool k_param_set = false;
+  while ((c = getopt(argc, argv, "p:hr:k:")) >= 0) {
     switch (c) {
     case 'h':
       usage = true;
@@ -302,6 +302,9 @@ int ms_merge(int argc, char *argv[]) {
     case 'r':
       result_fn = optarg;
       break;
+    case 'k':
+        k_param_set = true;
+        break;
     default:
       return usage_merge();
     }
@@ -309,6 +312,17 @@ int ms_merge(int argc, char *argv[]) {
   if (usage) {
     usage_merge();
     return 0;
+  }
+  if (fns.size() < 2) {
+    std::cerr << "At least two indices are required for merging." << std::endl;
+    return usage_merge();
+  }
+  if (result_fn.empty()) {
+      std::cerr << "Path to the result file is a required argument." << std::endl;
+      return usage_merge();
+  }
+  if (k_param_set) {
+      std::cerr << "WARNING: Parameter -k is ignored." << std::endl;
   }
 
   fms_index res = load_index(fns[0]);
@@ -328,9 +342,10 @@ int ms_normalize(int argc, char *argv[]) {
   bool usage = false;
   int c;
   int k = 0;
-  int d_max = 5;
   bool only_print = false;
-  bool use_local = false;
+  // For backwards compatibility.
+  bool l_param_used = false;
+  bool d_param_used = false;
   std::string fn;
   std::function<bool(size_t, size_t)> f = mask_function("or", true);
   while ((c = getopt(argc, argv, "p:hk:d:f:sl")) >= 0) {
@@ -353,13 +368,13 @@ int ms_normalize(int argc, char *argv[]) {
       k = atoi(optarg);
       break;
     case 'd':
-      d_max = atoi(optarg);
+      d_param_used = true;
       break;
     case 's':
       only_print = true;
       break;
     case 'l':
-      use_local = true;
+        l_param_used = true;
       break;
     default:
       return usage_normalize();
@@ -369,9 +384,20 @@ int ms_normalize(int argc, char *argv[]) {
     usage_normalize();
     return 0;
   }
-
-  f(0,1);
-  f(1,3);
+  if (fn.empty()) {
+    std::cerr << "Path to the fasta file is a required argument." << std::endl;
+    return usage_normalize();
+  }
+    if (k == 0) {
+        std::cerr << "Size of k-mer is a required argument." << std::endl;
+        return usage_normalize();
+    }
+    if (l_param_used) {
+        std::cerr << "WARNING: Parameter -l is ignored." << std::endl;
+    }
+    if (d_param_used) {
+        std::cerr << "WARNING: Parameter -d is ignored." << std::endl;
+    }
 
   std::cerr << "Starting " << fn << std::endl;
   fms_index index = load_index(fn);
