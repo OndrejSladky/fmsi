@@ -11,10 +11,7 @@ cmake-build-debug/
 *.sdsl
 
 # BW files
-*.mask
-*.sstr
-*.fm9
-*.klcp
+*.fmsi.*
 
 # Compiled binaries
 ms-index

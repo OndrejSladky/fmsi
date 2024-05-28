@@ -19,7 +19,11 @@ static int usage() {
   std::cerr << "  `index` - Creates a BWT based index of the given masked "
                "superstring."
             << std::endl;
-  std::cerr << "  `query` - Queries a $k$-mer against an index." << std::endl;
+  std::cerr << "  `query` - Queries a k-mer against an index." << std::endl;
+  std::cerr << "  `union` - Compute union of k-mers from several indices." << std::endl;
+  std::cerr << "  `inter` - Compute intersection of k-mers from several indices." << std::endl;
+  std::cerr << "  `diff`  - Compute set difference of k-mers from several indices." << std::endl;
+  std::cerr << "  `symdiff` - Compute symmetric difference of k-mers from several indices." << std::endl;
   std::cerr << "  `clean` - Cleans the files stored for index." << std::endl;
   std::cerr << "  `merge` - Merges several indices." << std::endl;
   std::cerr << "  `compact` - Compacts the given index." << std::endl;
@@ -55,6 +59,23 @@ static int usage_merge() {
   std::cerr << "  `-h`                - Prints this help and terminates."
             << std::endl;
   return 1;
+}
+
+static int usage_op(std::string op) {
+    std::cerr << "FMSI " << op << " performs the corresponding set operation on several indices." << std::endl;
+    std::cerr << std::endl << "The recognized arguments are:" << std::endl;
+    std::cerr << "  `-p path_to_fasta`  - The path to the fasta file with "
+                 "input sets. Can be provided multiple times. It is "
+                 "expected that it appears at least twice."
+              << std::endl;
+    std::cerr << "  `-r path_of_result` - The path where the result should be "
+                 "stored. This is a required argument."
+              << std::endl;
+    std::cerr << "  `-k value_of_k` - The size of queried k-mers. Required."
+              << std::endl;
+    std::cerr << "  `-h`                - Prints this help and terminates."
+              << std::endl;
+    return 1;
 }
 
 static int usage_query() {
@@ -203,7 +224,6 @@ int ms_index(int argc, char *argv[]) {
   }
 
   std::cerr << "Starting " << fn << std::endl;
-  std::string superstring_path = fn + ".sstr";
   auto ms = read_masked_superstring(fn);
   if (ms.size() == 0) {
     std::cerr << "The file '" << fn
@@ -329,6 +349,10 @@ int ms_merge(int argc, char *argv[]) {
   std::cerr << "Loaded index " << fns[0] << std::endl;
 
   for (size_t i = 1; i < fns.size(); ++i) {
+      // TODO: investigate why this is needed (the ranks must have gotten set to nullptr somewhere).
+      res.ac_gt_rank = sdsl::rank_support_v5<1>(&res.ac_gt);
+      res.ac_rank = sdsl::rank_support_v5<1>(&res.ac);
+      res.gt_rank = sdsl::rank_support_v5<1>(&res.gt);
       res = merge(res, load_index(fns[i]));
       std::cerr << "Loaded and merged index " << fns[i] << std::endl;
   }
@@ -442,6 +466,89 @@ int ms_export(int argc, char *argv[]) {
     return 0;
 }
 
+int ms_op(int argc, char *argv[], std::string op) {
+    bool usage = false;
+    int c;
+    int k = 0;
+    std::vector<std::string> fns;
+    std::string result_fn;
+    while ((c = getopt(argc, argv, "p:hr:k:")) >= 0) {
+        switch (c) {
+            case 'h':
+                usage = true;
+                break;
+            case 'p':
+                fns.emplace_back(optarg);
+                break;
+            case 'r':
+                result_fn = optarg;
+                break;
+            case 'k':
+                k = atoi(optarg);
+                break;
+            default:
+                return usage_merge();
+        }
+    }
+    if (usage) {
+        usage_op(op);
+        return 0;
+    }
+    if (fns.size() < 2) {
+        std::cerr << "At least two indices are required for merging." << std::endl;
+        return usage_op(op);
+    }
+    if (result_fn.empty()) {
+        std::cerr << "Path to the result file is a required argument." << std::endl;
+        return usage_op(op);
+    }
+    if (k == 0) {
+        std::cerr << "Size of k-mer is a required argument." << std::endl;
+        return usage_op(op);
+    }
+
+    fms_index res = load_index(fns[0]);
+    std::cerr << "Loaded index " << fns[0] << std::endl;
+
+    for (size_t i = 1; i < fns.size(); ++i) {
+        // TODO: investigate why this is needed (the ranks must have gotten set to nullptr somewhere).
+        res.ac_gt_rank = sdsl::rank_support_v5<1>(&res.ac_gt);
+        res.ac_rank = sdsl::rank_support_v5<1>(&res.ac);
+        res.gt_rank = sdsl::rank_support_v5<1>(&res.gt);
+        res = merge(res, load_index(fns[i]));
+        if (op == "diff") {
+            // TODO: investigate why this is needed (the ranks must have gotten set to nullptr somewhere).
+            res.ac_gt_rank = sdsl::rank_support_v5<1>(&res.ac_gt);
+            res.ac_rank = sdsl::rank_support_v5<1>(&res.ac);
+            res.gt_rank = sdsl::rank_support_v5<1>(&res.gt);
+            res = merge(res, load_index(fns[i]));
+        }
+        std::cerr << "Loaded and merged index " << fns[i] << std::endl;
+    }
+
+
+    // TODO: investigate why this is needed (the ranks must have gotten set to nullptr somewhere).
+    res.ac_gt_rank = sdsl::rank_support_v5<1>(&res.ac_gt);
+    res.ac_rank = sdsl::rank_support_v5<1>(&res.ac);
+    res.gt_rank = sdsl::rank_support_v5<1>(&res.gt);
+
+    auto ms = export_ms(res);
+
+    demasking_function_t function = nullptr;
+    if (op == "union") function =  mask_function("or", true);
+    else if (op == "symdiff") function = mask_function("xor", true);
+    else if (op == "diff") function = mask_function("1-1", true);
+    else if (op == "inter") function = mask_function("2-2", true);
+    assert(function != nullptr);
+
+    ms = normalize(ms, k, function);
+    std::cerr << "Compacted result" << std::endl;
+
+    dump_index(construct(ms), result_fn);
+    std::cerr << "Result written" << std::endl;
+    return 0;
+}
+
 int ms_clean(int argc, char *argv[]) {
   bool usage = false;
   int c;
@@ -480,22 +587,25 @@ int main(int argc, char *argv[]) {
   int ret;
   if (argc < 2)
     return usage();
-  if (strcmp(argv[1], "index") == 0)
+  std::string op = argv[1];
+  if (op == "index")
     ret = ms_index(argc - 1, argv + 1);
-  else if (strcmp(argv[1], "query") == 0)
+  else if (op == "query")
     ret = ms_query(argc - 1, argv + 1);
-  else if (strcmp(argv[1], "clean") == 0)
+  else if (op == "clean")
     ret = ms_clean(argc - 1, argv + 1);
-  else if (strcmp(argv[1], "merge") == 0)
+  else if (op == "merge")
     ret = ms_merge(argc - 1, argv + 1);
   // Recognize "normalize" for backwards compatibility
-  else if (strcmp(argv[1], "normalize") == 0 || strcmp(argv[1], "compact") == 0)
+  else if (op == "normalize" || op == "compact")
     ret = ms_normalize(argc - 1, argv + 1);
-  else if (strcmp(argv[1], "export") == 0)
-      ret = ms_export(argc - 1, argv + 1);
-  else if (strcmp(argv[1], "-v") == 0)
+  else if (op == "export")
+    ret = ms_export(argc - 1, argv + 1);
+  else if (op == "union" || op == "inter" || op == "diff" || op == "symdiff")
+    ret = ms_op(argc, argv, op);
+  else if (op == "-v")
     return version();
-  else if (strcmp(argv[1], "-h") == 0) {
+  else if (op == "-h") {
     usage();
     return 0;
   } else
