@@ -64,7 +64,7 @@ This can be done in a few simple steps:
    - This can be done by [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel); simply run `kmercamel -c -k 31 -p fasta.fa -o ms.fa` (with appropriate values for `-k` and `-p`).
    - If you obtained the masked superstring in a different way, make sure it minimizes the number of ones; if you're unsure, you can use `kmercamel optimize -c -a zeros -k 31 -p ms_more_ones.fa -o ms.fa`. No need to optimize superstrings directly computed by KmerCamel🐫.
 2. **Index the masked superstring** with `./fmsi index -p ms.fa`.
-3. **Perform the set operations** you wish with `./fmsi name_of_the_operation -k 31 -p ms1.fa -p ms2.fa -r ms.fa`. Possible operations (use the names instead of `name_of_the_operation`) are:
+3. **Perform the set operations** you wish with `./fmsi [operation] -k 31 -p ms1.fa -p ms2.fa -r ms.fa`. Possible operations (use the names instead of `[operation]`) are:
    - `union` to compute the union.
    - `inter` to compute the intersection
    - `diff` to compute the set difference
