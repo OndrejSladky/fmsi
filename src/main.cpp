@@ -538,7 +538,7 @@ int ms_op(int argc, char *argv[], std::string op) {
     if (op == "union") function =  mask_function("or", true);
     else if (op == "symdiff") function = mask_function("xor", true);
     else if (op == "diff") function = mask_function("1-1", true);
-    else if (op == "inter") function = mask_function("2-2", true);
+    else if (op == "inter") function = mask_function(std::to_string(fns.size()) + "-" + std::to_string(fns.size()), true);
     assert(function != nullptr);
 
     ms = normalize(ms, k, function);

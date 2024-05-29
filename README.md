@@ -1,11 +1,9 @@
 # FMSI ($f$-Masked Superstring Index)
 
-FMSI provides an experimental implementation of FMS-index - a BWT based indexing tool for
-$f$-masked superstrings, which enables to ask membership queries and perform set operations on the
-$k$-mer sets represented by the masked superstrings.
+FMSI is a memory-efficient tool for querying $k$-mer sets and performing set operations on them.
+Internally it implements the FMS-index - a BWT based index for $f$-masked superstrings.
 
-The implementation is based on the [SDSL library](https://github.com/simongog/sdsl-lite).
-
+Note that currently the tool is still in development and especially the set operations are quite time-consuming.
 
 It is provided under the MIT license (see LICENSE file).
 
@@ -55,7 +53,41 @@ git clone --recursive git@github.com:OndrejSladky/fmsi.git
 
 Compile the program by running `make`.
 
-## How to run
+## How to use
+
+### Basic usage
+
+If you wish to perform set operations or answer membership queries without the need to understand the
+details of the $f$-masked superstring framework, FMSI can manage the details for you.
+This can be done in a few simple steps:
+1. **Compute a masked superstring.**
+   - This can be done by [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel); simply run `kmercamel -c -k 31 -p fasta.fa -o ms.fa` (with appropriate values for `-k` and `-p`).
+   - If you obtained the masked superstring in a different way, make sure it minimizes the number of ones; if you're unsure, you can use `kmercamel optimize -c -a zeros -k 31 -p ms_more_ones.fa -o ms.fa`. No need to optimize superstrings directly computed by KmerCamel🐫.
+2. **Index the masked superstring** with `./fmsi index -p ms.fa`.
+3. **Perform the set operations** you wish with `./fmsi name_of_the_operation -k 31 -p ms1.fa -p ms2.fa -r ms.fa`. Possible operations (use the names instead of `name_of_the_operation`) are:
+   - `union` to compute the union.
+   - `inter` to compute the intersection
+   - `diff` to compute the set difference
+   - `symdiff` to compute the symmetric difference
+4. **Query the index** with `./fmsi query -p ms.fa -q query.fa -k 31`.
+5. To **get back the underlying masked superstring**, use `./fmsi export -p ms.fa`.
+
+If you use FMSI this way, it ensures that operations in any order and queries to any index are computed correctly,
+while keeping the memory usage for queries as low as possible. Furthermore, exported $f$-masked superstrings are always,
+or-masked superstrings, which are the default masked superstrings.
+
+The only downside to this approach is that each set operation uses compaction, which is the most time- and memory- consuming
+part of the process, which in some use cases might cause slowdowns which are not necessary. If this is your case,
+you probably want to stick to the advanced usage, managing the functions and building block methods yourself.
+
+### Advanced usage
+
+If you wish to manage the operations yourself, the workflow is quite similar to the basic usage, with the following changes:
+- Underlying $f$-MS concatenation can be done with `./fmsi merge`. Details on which $f$ should be used is described in Chapter 4 of the [paper](https://doi.org/10.1101/2024.03.06.583483).
+- Compaction and change back to the or-masked superstring can be done with `./fmsi compact`.
+- If you query the index with different function than or, use the `-f` argument. The same applies to compaction.
+
+### Commands overview
 
 To run the tool, run `./fmsi [command]`
 
@@ -63,93 +95,23 @@ The recognized commands are:
 
 - `index` Creates a BWT based index of the given masked superstring.
 - `query` Queries a $k$-mer against an index.
+- `union` Performs union on two indexes. Expects or-MS.
+- `inter` Performs intersection on two indexes. Expects or-MS.
+- `diff`  Performs set difference on two indexes. Expects or-MS.
+- `symdiff` Performs symmetric difference on two indexes. Expects or-MS.
 - `merge` Merge several indexes.
 - `compact` Compacts an index.
 - `export` Export the underlying masked superstring.
 - `clean` Cleans the files stored for index.
 - `-v`    Prints the version of the program.
+- `-h`    Prints the help.
 
-### Index
-
-Index (`./fmsi index`) recognizes the following arguments:
-
-- `-p path_to_fasta` - The path to the fasta file with masked superstring to be indexed. This is a required argument.
-- `-k value_of_k`    - The size of one k-mer. If not provided k is computed from the masked superstring under the assumption that the last run of zeros has length k-1.
-
-For example: `./fmsi index -p spneumoniae.fa -k 13` 
-
-### Query
-
-Query (`./fmsi query`) returns whether the provided $k$-mer is in the masked superstring or not.
-Note that `./fmsi index` must be run on the provided fasta file beforehand.
-
-It recognizes the following arguments:
-
-- `-p path_to_fasta` - The path to the fasta file from which the index was created. Required.
-- `-q path_to_queries` - The path to the file with $k$-mer to be queried (each on a separate line). Required.
-- `-k value_of_k`    - The size of one k-mer. Required.
-- `-f function`      - A function to determine whether a $k$-mer
-is represented based on the number of set and unset occurrences.
-The recognized functions are following:
-  - `or`  - Consider $k$-mer represented when any of its occurrences is set. This is the default function.
-  - `all` - Assume that all occurrences are either set or unset and determine the presence by arbitrary occurrence.
-  - `and` - Consider $k$-mer represented when all its occurrences are set.
-  - `xor` - Consider $k$-mer represented when an odd number of occurrences is set.
-  - `X-Y` (where X and Y can be any integers) - Consider $k$-mer represented when its number of set occurrences is between X and Y (inclusive).
-
-For example: `./fmsi query -p spneumoniae.fa -f xor ACGT`
-
-### Merge
-
-Merge (`./fmsi merge`) creates a single index from several indexes representing the concatenation of the
-corresponding masked superstrings.
-Note that `./fmsi index` must be run on the provided fasta files beforehand.
-
-It recognizes the following arguments:
-
-- `-p path_to_fasta` - The path to the fasta file from which the index was created. Can be provided multiple times. Required at least twice.
-- `-r path_to_result` - The path to the file where the result will be stored. Required.
-- `-k value_of_k`    - The size of one k-mer.
-
-For example: `./fmsi merge -p spneumoniae1.fa -p spneumoniae2.fa -r spneumoniae.fa -k 13`
-
-### Compact
-
-Compact (`./fmsi compacts`) compacts the index by removing the redundant information by computing a new or-masked superstring.
-Especially note that the resulting superstring is or-masked superstring and not f-masked superstring.
-
-It recognizes the following arguments:
-
-- `-p path_to_fasta` - The path to the fasta file from which the index was created. This is a required argument.
-- `-k value_of_k`    - The size of one k-mer. Required.
-- `-f function`      - A function to determine whether a $k$-mer is represented based on the number of set and unset occurrences.
-  The recognized functions are following:
-  - `or`  - Consider $k$-mer represented when any of its occurrences is set. This is the default function.
-  - `all` - Assume that all occurrences are either set or unset and determine the presence by arbitrary occurrence.
-  - `and` - Consider $k$-mer represented when all its occurrences are set.
-  - `xor` - Consider $k$-mer represented when an odd number of occurrences is set.
-  - `X-Y` (where X and Y can be any integers) - Consider $k$-mer represented when its number of set occurrences is between X and Y (inclusive).
-- `-s`                - Only print the masked superstring and do not modify the index.
-- `-l`                - Use the local algorithm acting directly on the index.
-- `-d value_of_d_max` - The maximum extension length. Relevant only for the local algorithm. Default is 5.
-
-For example: `./fmsi compact -p spneumoniae.fa -k 13 -f xor -s`
-
-### Export
-
-Export (`./fmsi export`) recognizes the following arguments:
-
-- `-p path_to_fasta` - The path to the fasta from which the index was created. This is a required argument.
-
-
-### Clean
-
-Clean (`./fmsi clean`) recognizes the following arguments:
-
-- `-p path_to_fasta` - The path to the fasta from which the index was created. This is a required argument.
-
+Each command has its own set of arguments, which can be displayed by running `./fmsi [command] -h`.
 
 ## How to run unittests
 
 To run the associated tests, simply run `make test`.
 
+## Contact
+
+Ondřej Sladký - `sladky@iuuk.mff.cuni.cz`
