@@ -90,7 +90,7 @@ static int usage_query() {
                "the index was created. Required."
             << std::endl;
   std::cerr << "  `-q path_to_queries` - The path to the file with k-mers to "
-               "query. Required."
+               "query. Set '-' for standard input (default)."
             << std::endl;
   std::cerr << "  `-k value_of_k` - The size of queried k-mers. Required."
             << std::endl;
@@ -114,6 +114,7 @@ static int usage_query() {
                "$k$-mer represented when its number of set occurrences is "
                "between X and Y (inclusive)."
             << std::endl;
+  std::cerr << "  '-F' - Flush each k-mer result to allow interactive mode." << std::endl;
   std::cerr << "  `-h` - Prints this help and terminates." << std::endl;
   return 1;
 }
@@ -245,9 +246,10 @@ int ms_query(int argc, char *argv[]) {
   int c;
   int k = 0;
   std::string fn;
-  std::string query_fn;
+  std::string query_fn = "-";
   std::function<bool(size_t, size_t)> f = mask_function("or");
-  while ((c = getopt(argc, argv, "p:f:hq:k:")) >= 0) {
+  bool flush = false;
+  while ((c = getopt(argc, argv, "p:f:hq:k:F")) >= 0) {
     switch (c) {
     case 'f':
       try {
@@ -269,6 +271,9 @@ int ms_query(int argc, char *argv[]) {
     case 'k':
       k = atoi(optarg);
       break;
+    case 'F':
+      flush = true;
+      break;
     default:
       return usage_query();
     }
@@ -279,21 +284,30 @@ int ms_query(int argc, char *argv[]) {
   } else if (fn.empty()) {
     std::cerr << "Path to the fasta file is a required argument." << std::endl;
     return usage_query();
-  } else if (query_fn.empty()) {
-    std::cerr << "Path to the file with queries is a required argument."
-              << std::endl;
-    return usage_query();
   }
 
   fms_index index = load_index(fn);
 
-  std::ifstream query_file(query_fn);
+  std::istream *query_stream;
+  std::ifstream query_file;
+  if (query_fn == "-")
+      query_stream = &std::cin;
+  else {
+      query_file = std::ifstream (query_fn);
+      if (!query_file) {
+          std::cerr << "Incorrect path to queries" << std::endl;
+          return usage_query();
+      }
+      query_stream = &query_file;
+  }
+
   std::string kmer;
-  while (query_file >> kmer) {
+  while (*query_stream >> kmer) {
     if (kmer.size() != size_t(k)) {
       std::cerr << "Skipped - size of queried k-mer " << kmer.size()
                 << " is not k=" << k << std::endl;
       std::cout << "SKIPPED" << std::endl;
+      if (flush) std::cout.flush();
       continue;
     }
     bool found = query(index, kmer, f);
@@ -301,6 +315,7 @@ int ms_query(int argc, char *argv[]) {
       std::cout << "FOUND\n";
     else
       std::cout << "NOT FOUND\n";
+    if (flush) std::cout.flush();
   }
   return 0;
 }
