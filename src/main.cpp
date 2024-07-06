@@ -284,6 +284,9 @@ int ms_query(int argc, char *argv[]) {
   } else if (fn.empty()) {
     std::cerr << "Path to the fasta file is a required argument." << std::endl;
     return usage_query();
+  } else if (k == 0) {
+    std::cerr << "k is a required argument." << std::endl;
+    return usage_query();
   }
 
   fms_index index = load_index(fn);

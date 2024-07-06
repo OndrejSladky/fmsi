@@ -22,6 +22,23 @@ namespace {
         ret.gt_rank.set_vector(&ret.gt);
         return ret;
     }
+    fms_index get_dummy_index2() {
+        fms_index ret = { //GGTAAGA$, 11001000$
+                sdsl::bit_vector({0, 1, 1, 0, 0, 0, 1, 1, 1}),
+                sdsl::rank_support_v5<1>(),
+                sdsl::bit_vector({0, 0, 0, 0}),
+                sdsl::rank_support_v5<1>(),
+                sdsl::bit_vector({0,1,0,1,0}),
+                sdsl::rank_support_v5<1>(),
+                sdsl::rrr_vector<>({0,0,1,0,0,1,1,0,0}),
+                std::vector<size_t>({1, 4, 4, 7}),
+                5
+        };
+        ret.ac_gt_rank.set_vector(&ret.ac_gt);
+        ret.ac_rank.set_vector(&ret.ac);
+        ret.gt_rank.set_vector(&ret.gt);
+        return ret;
+    }
 
     TEST(FMS_INDEX, RANK) {
         auto index = get_dummy_index();
@@ -39,6 +56,26 @@ namespace {
                 {7, 2, 2},
                 {8, 2, 3},
                 {0, 2, 0},
+        };
+
+        for (auto t: tests) {
+            auto got_result = rank(index, t.i, t.c);
+
+            EXPECT_EQ(got_result, t.want_result);
+        }
+    }
+
+    TEST(FMS_INDEX, RANK2) {
+        auto index = get_dummy_index2();
+        struct test_case {
+            size_t i;
+            byte c;
+            size_t want_result;
+        };
+        std::vector<test_case> tests = {
+                {4, 0, 2},
+                {5, 0, 3},
+                {6, 0, 3}
         };
 
         for (auto t: tests) {
@@ -91,6 +128,26 @@ namespace {
                 {"GA", false},
                 {"GGG", false},
                 {"CC", true},
+        };
+
+        for (auto t: tests) {
+            auto got_result = query(index, t.query, nullptr);
+
+            EXPECT_EQ(got_result, t.want_result);
+        }
+    }
+
+    TEST(FMS_INDEX, QUERY2) {
+        auto index = get_dummy_index2();
+        struct test_case {
+            std::string query;
+            bool want_result;
+        };
+        std::vector<test_case> tests = {
+                {"AAGA", true},
+                {"AAGAA", false},
+                {"GGTTAAGA", true},
+                {"GTTAAGA", true},
         };
 
         for (auto t: tests) {

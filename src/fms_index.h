@@ -60,7 +60,8 @@ size_t rank(const fms_index& index, size_t i, byte c) {
     } else { // A/C
         auto c_position = index.ac_rank(i - gt_position);
         if (c == 0) { // A
-            return i - gt_position - c_position - (i >= index.dollar_position);
+            // Ranks are offset by 1 compared to the indices.
+            return i - gt_position - c_position - (i >= index.dollar_position + 1);
         } else { // C
             return c_position;
         }
@@ -151,6 +152,7 @@ fms_index construct(std::string ms) {
         bwt[isa[i+1]] = char_to_int(ms[i]);
         sa_transformed_mask[isa[i]] = is_upper(ms[i]);
     }
+
     index.dollar_position = isa[0];
     delete[] isa;
     index.sa_transformed_mask = sdsl::rrr_vector<>(sa_transformed_mask);
