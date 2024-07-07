@@ -1,5 +1,7 @@
 # FMSI ($f$-Masked Superstring Index)
 
+[![FMSI test](https://github.com/OndrejSladky/fmsi/actions/workflows/ci.yml/badge.svg)](https://github.com/OndrejSladky/fmsi/actions/)
+
 FMSI is a memory-efficient tool for querying $k$-mer sets and performing set operations on them.
 Internally it implements the FMS-index - a BWT based index for $f$-masked superstrings.
 
