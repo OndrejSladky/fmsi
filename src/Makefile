@@ -4,7 +4,7 @@ CXXFLAGS=							-g -Wall -Wno-unused-function -std=c++17 -g3
 PROG=									../fmsi
 INCLUDES-PATH?=.
 INCLUDES=							-I$(INCLUDES-PATH)/include -L$(INCLUDES-PATH)/lib 
-LIBS=									-lz -lsdsl -ldivsufsort -ldivsufsort64
+LIBS=									-lsdsl -ldivsufsort -ldivsufsort64
 
 all:$(PROG)
 
