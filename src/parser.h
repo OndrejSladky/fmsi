@@ -23,7 +23,7 @@ std::string read_masked_superstring(std::string fn) {
     std::vector<char> ret;
   int64_t l;
   while ((l = kseq_read(seq)) >= 0) {
-    for (int i = 0; i < l; ++i) {
+    for (int64_t i = 0; i < l; ++i) {
       ret.push_back(seq->seq.s[i]);
     }
   }
