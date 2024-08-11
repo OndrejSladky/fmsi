@@ -21,7 +21,7 @@ std::string read_masked_superstring(std::string fn) {
 
   seq = kseq_init(fp);
     std::vector<char> ret;
-  int l;
+  int64_t l;
   while ((l = kseq_read(seq)) >= 0) {
     for (int i = 0; i < l; ++i) {
       ret.push_back(seq->seq.s[i]);
