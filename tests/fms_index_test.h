@@ -8,11 +8,11 @@ namespace {
     fms_index get_dummy_index() {
         fms_index ret = { //CAGGTAG$, 1011100$
                 sdsl::bit_vector({1, 1, 0, 0, 0, 0, 1, 1}),
-                sdsl::rank_support_v5<1>(),
+                sdsl::rank_support_v<1>(),
                 sdsl::bit_vector({1, 0, 0, 0}),
-                sdsl::rank_support_v5<1>(),
+                sdsl::rank_support_v<1>(),
                 sdsl::bit_vector({0,1,0,0}),
-                sdsl::rank_support_v5<1>(),
+                sdsl::rank_support_v<1>(),
                 sdsl::rrr_vector<>({0, 0, 0, 1, 0, 1, 1, 1}),
                 std::vector<size_t>({1, 3, 4, 7}),
                 3
@@ -25,11 +25,11 @@ namespace {
     fms_index get_dummy_index2() {
         fms_index ret = { //GGTAAGA$, 11001000$
                 sdsl::bit_vector({0, 1, 1, 0, 0, 0, 1, 1, 1}),
-                sdsl::rank_support_v5<1>(),
+                sdsl::rank_support_v<1>(),
                 sdsl::bit_vector({0, 0, 0, 0}),
-                sdsl::rank_support_v5<1>(),
+                sdsl::rank_support_v<1>(),
                 sdsl::bit_vector({0,1,0,1,0}),
-                sdsl::rank_support_v5<1>(),
+                sdsl::rank_support_v<1>(),
                 sdsl::rrr_vector<>({0,0,1,0,0,1,1,0,0}),
                 std::vector<size_t>({1, 4, 4, 7}),
                 5
@@ -131,7 +131,7 @@ namespace {
         };
 
         for (auto t: tests) {
-            auto got_result = query(index, t.query, nullptr);
+            auto got_result = query_kmers<query_mode::orr, false, int64_t>(index, t.query, t.query.size());
 
             EXPECT_EQ(got_result, t.want_result);
         }
@@ -151,7 +151,7 @@ namespace {
         };
 
         for (auto t: tests) {
-            auto got_result = query(index, t.query, nullptr);
+            auto got_result = query_kmers<query_mode::orr, false, int64_t>(index, t.query, t.query.size());
 
             EXPECT_EQ(got_result, t.want_result);
         }

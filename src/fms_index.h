@@ -4,6 +4,7 @@
 #include <sdsl/rrr_vector.hpp>
 #include <sdsl/bit_vectors.hpp>
 #include <sdsl/rank_support_v5.hpp>
+#include <sdsl/rank_support_v.hpp>
 #include "QSufSort.h"
 #include "functions.h"
 
@@ -11,38 +12,93 @@ typedef unsigned char byte;
 
 struct fms_index {
     sdsl::bit_vector ac_gt;
-    sdsl::rank_support_v5<1> ac_gt_rank;
+    sdsl::rank_support_v<1> ac_gt_rank;
     sdsl::bit_vector ac;
-    sdsl::rank_support_v5<1> ac_rank;
+    sdsl::rank_support_v<1> ac_rank;
     sdsl::bit_vector gt;
-    sdsl::rank_support_v5<1> gt_rank;
+    sdsl::rank_support_v<1> gt_rank;
     sdsl::rrr_vector<> sa_transformed_mask;
     std::vector<size_t> counts;
     size_t dollar_position;
 };
 
-inline byte char_to_int(char c) {
-    switch (c) {
-        case 'A':
-            return 0;
-        case 'C':
-            return 1;
-        case 'G':
-            return 2;
-        case 'T':
-            return 3;
-        case 'a':
-            return 0;
-        case 'c':
-            return 1;
-        case 'g':
-            return 2;
-        case 't':
-            return 3;
-        default:
-            return -1;
-    }
+
+static const uint8_t nucleotideToInt[] = {
+        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+        4, 0, 4, 1,  4, 4, 4, 2,  4, 4, 4, 4,  4, 4, 4, 4,
+        4, 4, 4, 4,  3, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+        4, 0, 4, 1,  4, 4, 4, 2,  4, 4, 4, 4,  4, 4, 4, 4,
+        4, 4, 4, 4,  3, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4
+};
+static const char complementaryNucleotide[] = {
+        'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
+        'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
+        'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
+        'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
+        'N', 'T', 'N', 'G',  'N', 'N', 'N', 'C',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
+        'N', 'N', 'N', 'N',  'A', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
+        'N', 't', 'N', 'g',  'N', 'N', 'N', 'c',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
+        'N', 'N', 'N', 'N',  'a', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
+        'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
+        'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
+        'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
+        'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
+        'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
+        'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
+        'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
+        'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N'
+};
+
+/// Checkered mask. cmask<uint16_t, 1> is every other bit on
+/// (0x55). cmask<uint16_t,2> is two bits one, two bits off (0x33). Etc.
+/// Copyright: Jellyfish GPL-3.0
+template<typename U, int len, int l = sizeof(U) * 8 / (2 * len)>
+struct cmask {
+    static const U v =
+            (cmask<U, len, l - 1>::v << (2 * len)) | (((U)1 << len) - 1);
+};
+template<typename U, int len>
+struct cmask<U, len, 0> {
+    static const U v = 0;
+};
+
+/// Compute the reverse complement of a word.
+/// Copyright: Jellyfish GPL-3.0
+template <typename U>
+inline U word_reverse_complement(U w) {
+    w = ((w >> 2)  & cmask<U, 2 >::v) | ((w & cmask<U, 2 >::v) << 2);
+    w = ((w >> 4)  & cmask<U, 4 >::v) | ((w & cmask<U, 4 >::v) << 4);
+    w = ((w >> 8)  & cmask<U, 8 >::v) | ((w & cmask<U, 8 >::v) << 8);
+    w = ((w >> 16) & cmask<U, 16>::v) | ((w & cmask<U, 16>::v) << 16);
+    w = ( w >> 32                   ) | ( w                    << 32);
+    return ((U)-1) - w;
 }
+
+/// Compute the reverse complement of the given k-mer.
+template <typename kmer_t>
+kmer_t ReverseComplement(kmer_t kMer, int k) {
+    return (((kmer_t)word_reverse_complement(kMer)) >> ((sizeof(kMer)<<3) - (k << 1))) & ((kmer_t(1) << (k << 1)) - kmer_t(1));
+}
+
+std::string ReverseComplementString(const std::string& s) {
+    std::string ret(s.size(), 'N');
+    for (size_t i = 0; i < s.size(); ++i) {
+        ret[s.size() - i - 1] = complementaryNucleotide[(uint8_t)s[i]];
+    }
+    return ret;
+}
+
 
 inline bool is_upper(char c) {
     return c >= 'A' && c <= 'Z';
@@ -84,56 +140,163 @@ void update_range(const fms_index& index, size_t& i, size_t& j, byte c) {
     j = count + rank(index, j, c);
 }
 
-bool query(const fms_index& index, const std::string& pattern, demasking_function_t f) {
-    size_t i = 0, i_rev = 0;
-    size_t j = index.sa_transformed_mask.size(), j_rev = index.sa_transformed_mask.size();
-    for (size_t k = pattern.size(); k > 0; --k) {
-        update_range(index, i, j, char_to_int(pattern[k-1]));
-    }
-    // Separately optimize or.
-    if (f == nullptr) {
-        for (size_t k = i; k < j; ++k) {
-            if (index.sa_transformed_mask[k]) {
-                return true;
-            }
+template <typename T>
+void update_range_with_pattern(const fms_index& index, size_t& sa_start, size_t& sa_end, T pattern, int k) {
+    if (sa_start == size_t(-1)) {
+        sa_start = 0;
+        sa_end = index.sa_transformed_mask.size();
+        // Find the SA coordinates of the forward pattern.
+        for (int i = 0; i < k; ++i) {
+            update_range(index, sa_start, sa_end, pattern & 3);
+            pattern >>= 2;
         }
+    } else {
+        // Streaming query.
+        // TODO: Update with klcp.
+        throw std::invalid_argument("Streaming queries are not supported yet.");
+        int shift = 2 * (k - 1);
+        T mask = 0b11 << shift;
+        update_range(index, sa_start, sa_end, (pattern & mask) >> shift);
     }
-    for (char p : pattern) {
-        update_range(index, i_rev, j_rev, 3 ^ char_to_int(p));
-    }
-    // Separately optimize or.
-    if (f == nullptr) {
-        for (size_t k = i_rev; k < j_rev; ++k) {
-            if (index.sa_transformed_mask[k]) {
-                return true;
-            }
-        }
-        return false;
-    }
-    // Do not optimize code for k-mers that are their own reverse complement as they're not very common.
-    bool own_rc = true;
-    for (size_t k = 0; k < pattern.size(); ++k) {
-        if (char_to_int(pattern[k]) != (3 ^ char_to_int(pattern[pattern.size() - k - 1]))) {
-            own_rc = false;
-            break;
-        }
-    }
-    size_t ones = 0;
-    for (size_t k = i; k < j; ++k) {
-        ones += index.sa_transformed_mask[k];
-    }
-    if (!own_rc) for (size_t k = i_rev; k < j_rev; ++k) {
-        ones += index.sa_transformed_mask[k];
-    }
-    size_t total = j - i + j_rev - i_rev;
-    if (own_rc) total = j - i;
-    return f((int)ones, (int)total);
 }
+
+template <bool maximized_ones=false, typename T>
+int single_query_or(const fms_index& index, T pattern, int k, size_t& sa_start, size_t& sa_end) {
+    update_range_with_pattern(index, sa_start, sa_end, pattern, k);
+    // Separately optimize all-or-nothing and or.
+    if constexpr (maximized_ones) {
+        if (sa_start != sa_end) return index.sa_transformed_mask[sa_start];
+        return -1;
+    } else {
+        for (size_t i = sa_start; i < sa_end; ++i) {
+            if (index.sa_transformed_mask[i]) {
+                return true;
+            }
+        }
+        return (sa_start == sa_end) ? -1 : false;
+    }
+}
+
+template <bool maximized_ones=false, typename T>
+int single_query_or(const fms_index& index, T pattern, int k) {
+    size_t sa_start = -1, sa_end = -1;
+    return single_query_or<maximized_ones>(index, pattern, k, sa_start, sa_end);
+}
+
+template <typename T>
+std::pair<size_t, size_t> single_query_general(const fms_index& index, T pattern, int k, size_t& sa_start, size_t& sa_end) {
+    update_range_with_pattern(index, sa_start, sa_end, pattern, k);
+    size_t ones = 0;
+    for (size_t i = sa_start; i < sa_end; ++i) {
+        ones += index.sa_transformed_mask[i];
+    }
+    return {ones, sa_end - sa_start};
+}
+
+template <typename T>
+std::pair<size_t, size_t> single_query_general(const fms_index& index, T pattern, int k) {
+    size_t sa_start = -1, sa_end = -1;
+    return single_query_general(index, pattern, k, sa_start, sa_end);
+}
+
+template <bool maximized_ones = false, typename T>
+std::vector<bool> query_kmers_streaming_forward_or(const fms_index& index, std::string pattern, int k) {
+    T kmer = 0;
+    for (int i = 0; i < k; ++i) {
+        kmer = (kmer << 2) | nucleotideToInt[(uint8_t)pattern[i]];
+    }
+    std::vector<bool> result (pattern.size() - k + 1);
+    size_t sa_start = -1, sa_end = -1;
+    result[0] = single_query_or<maximized_ones>(index, kmer, k, sa_start, sa_end);
+    // Robust mask working even for k power of 2.
+    T kmers_mask = (1 << (2 * k - 1));
+    kmers_mask = kmers_mask | (kmers_mask - 1);
+
+    for (size_t i = k; i < pattern.size(); ++i) {
+        kmer = (kmer << 2) | nucleotideToInt[(uint8_t)pattern[i]];
+        kmer &= kmers_mask;
+        result[i - k + 1] = single_query_or<maximized_ones>(index, kmer, k, sa_start, sa_end);
+    }
+    return result;
+}
+
+
+enum class query_mode {
+    orr,
+    all,
+    general,
+};
+
+template <query_mode mode, typename T>
+size_t query_kmers_single_bidir(const fms_index& index, std::string pattern, int k, demasking_function_t f) {
+    T kmer = 0;
+    for (int i = 0; i < k - 1; ++i) {
+        kmer = (kmer << 2) | nucleotideToInt[(uint8_t)pattern[i]];
+    }
+    size_t result = 0;
+    for (size_t i = k - 1; i < pattern.size(); ++i) {
+        kmer = (kmer << 2) | nucleotideToInt[(uint8_t)pattern[i]];
+        if constexpr (mode != query_mode::general) {
+            int got;
+            if constexpr (mode == query_mode::orr) {
+                got = single_query_or<false>(index, kmer, k);
+            } else {
+                got = single_query_or<true>(index, kmer, k);
+            }
+            if constexpr (mode == query_mode::orr) {
+                if (got != 1) {
+                    got = single_query_or<false>(index, ReverseComplement(kmer, k), k);
+                }
+            } else {
+                if (got == -1) {
+                    got = single_query_or<true>(index, ReverseComplement(kmer, k), k);
+                }
+            }
+            result += got == 1;
+        } else {
+            auto [ones, total] = single_query_general(index, kmer, k);
+            T rev_kmer = ReverseComplement(kmer, k);
+            if (rev_kmer != kmer) {
+                auto [ones_rev, total_rev] = single_query_general(index, rev_kmer, k);
+                ones += ones_rev;
+                total += total_rev;
+            }
+            if (f(ones, total)) {
+                ++result;
+            }
+        }
+    }
+    return result;
+}
+
+template <query_mode mode, bool has_klcp, typename T>
+size_t query_kmers(const fms_index& index, std::string pattern, int k, demasking_function_t f = nullptr) {
+    if constexpr (has_klcp && mode != query_mode::general) {
+        std::vector<bool> result = query_kmers_streaming_forward_or<T>(index, pattern, k);
+        pattern = ReverseComplementString(pattern);
+        std::vector<bool> result_rev = query_kmers_streaming_forward_or<T>(index, pattern, k);
+        size_t ret = 0;
+        for (size_t i = 0; i < result.size(); ++i) {
+            if (result[i] || result_rev[result.size() - i - 1]) {
+                ++ret;
+            }
+        }
+        return ret;
+    } else {
+        return query_kmers_single_bidir<mode, T>(index, pattern, k, f);
+    }
+}
+
+
+
+
+
+
 
 qsint_t* convert_superstring(std::string ms) {
     auto ret = new qsint_t[ms.size() + 1];
     for (size_t i = 0; i < ms.size(); ++i) {
-        ret[i] = char_to_int(ms[i]);
+        ret[i] = nucleotideToInt[(uint8_t)ms[i]];
     }
     return ret;
 }
@@ -149,7 +312,7 @@ fms_index construct(std::string ms) {
     sdsl::bit_vector sa_transformed_mask(ms.size() + 1);
     std::vector<byte> bwt (ms.size() + 1);
     for (size_t i = 0; i < ms.size(); ++i) {
-        bwt[isa[i+1]] = char_to_int(ms[i]);
+        bwt[isa[i+1]] = nucleotideToInt[(uint8_t)ms[i]];
         sa_transformed_mask[isa[i]] = is_upper(ms[i]);
     }
 
@@ -183,9 +346,9 @@ fms_index construct(std::string ms) {
         }
     }
     index.counts = {1, a_count, ac_count, ac_count + g_count};
-    index.ac_gt_rank = sdsl::rank_support_v5<1>(&index.ac_gt);
-    index.ac_rank = sdsl::rank_support_v5<1>(&index.ac);
-    index.gt_rank = sdsl::rank_support_v5<1>(&index.gt);
+    index.ac_gt_rank = sdsl::rank_support_v<1>(&index.ac_gt);
+    index.ac_rank = sdsl::rank_support_v<1>(&index.ac);
+    index.gt_rank = sdsl::rank_support_v<1>(&index.gt);
 
     return index;
 }
@@ -225,11 +388,11 @@ fms_index load_index(const std::string &fn) {
     fms_index index;
     auto basename = fn + ".fmsi";
     sdsl::load_from_file(index.ac_gt, basename + ".ac_gt");
-    index.ac_gt_rank = sdsl::rank_support_v5<1>(&index.ac_gt);
+    index.ac_gt_rank = sdsl::rank_support_v<1>(&index.ac_gt);
     sdsl::load_from_file(index.ac, basename + ".ac");
-    index.ac_rank = sdsl::rank_support_v5<1>(&index.ac);
+    index.ac_rank = sdsl::rank_support_v<1>(&index.ac);
     sdsl::load_from_file(index.gt, basename + ".gt");
-    index.gt_rank = sdsl::rank_support_v5<1>(&index.gt);
+    index.gt_rank = sdsl::rank_support_v<1>(&index.gt);
     sdsl::load_from_file(index.sa_transformed_mask, basename + ".mask");
     std::ifstream in(basename + ".misc");
     in >> index.dollar_position;

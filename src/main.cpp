@@ -247,12 +247,14 @@ int ms_query(int argc, char *argv[]) {
   int k = 0;
   std::string fn;
   std::string query_fn = "-";
+  std::string f_name = "or";
   std::function<bool(size_t, size_t)> f = mask_function("or");
   bool flush = false;
   while ((c = getopt(argc, argv, "p:f:hq:k:F")) >= 0) {
     switch (c) {
     case 'f':
       try {
+        f_name = optarg;
         f = mask_function(optarg);
       } catch (std::invalid_argument &) {
         std::cerr << "Function '" << optarg << "' not recognized." << std::endl;
@@ -304,21 +306,35 @@ int ms_query(int argc, char *argv[]) {
       query_stream = &query_file;
   }
 
-  std::string kmer;
-  while (*query_stream >> kmer) {
-    if (kmer.size() != size_t(k)) {
-      std::cerr << "Skipped - size of queried k-mer " << kmer.size()
-                << " is not k=" << k << std::endl;
-      std::cout << "SKIPPED" << std::endl;
-      if (flush) std::cout.flush();
+  std::string sequence;
+  size_t total_kmers = 0;
+  size_t found_kmers = 0;
+  while (*query_stream >> sequence) {
+    if (sequence.size() < size_t(k)) {
+        if (flush) {
+            std::cout << "0,0" << std::endl;
+        }
       continue;
     }
-    bool found = query(index, kmer, f);
-    if (found)
-      std::cout << "FOUND\n";
-    else
-      std::cout << "NOT FOUND\n";
-    if (flush) std::cout.flush();
+    size_t current_kmers = sequence.size() - k + 1;
+    size_t current_found_kmers;
+    if (f_name == "or") {
+        current_found_kmers = query_kmers<query_mode::orr, false, int64_t>(index, sequence, k);
+    } else if (f_name == "all") {
+        current_found_kmers = query_kmers<query_mode::all, false, int64_t>(index, sequence, k);
+    } else {
+        current_found_kmers = query_kmers<query_mode::general, false, int64_t>(index, sequence, k, f);
+    }
+    if (flush) {
+        std::cout << current_kmers << "," << current_found_kmers << std::endl;
+    }
+    total_kmers += current_kmers;
+    found_kmers += current_found_kmers;
+  }
+  if (!flush) {
+      std::cout << "Total k-mers: " << total_kmers << std::endl;
+      std::cout << "Found k-mers: " << found_kmers << " (" << 100.0 * found_kmers / total_kmers << "% of total k-mers)"
+                << std::endl;
   }
   return 0;
 }
@@ -368,9 +384,9 @@ int ms_merge(int argc, char *argv[]) {
 
   for (size_t i = 1; i < fns.size(); ++i) {
       // TODO: investigate why this is needed (the ranks must have gotten set to nullptr somewhere).
-      res.ac_gt_rank = sdsl::rank_support_v5<1>(&res.ac_gt);
-      res.ac_rank = sdsl::rank_support_v5<1>(&res.ac);
-      res.gt_rank = sdsl::rank_support_v5<1>(&res.gt);
+      res.ac_gt_rank = sdsl::rank_support_v<1>(&res.ac_gt);
+      res.ac_rank = sdsl::rank_support_v<1>(&res.ac);
+      res.gt_rank = sdsl::rank_support_v<1>(&res.gt);
       res = merge(res, load_index(fns[i]));
       std::cerr << "Loaded and merged index " << fns[i] << std::endl;
   }
@@ -530,15 +546,15 @@ int ms_op(int argc, char *argv[], std::string op) {
 
     for (size_t i = 1; i < fns.size(); ++i) {
         // TODO: investigate why this is needed (the ranks must have gotten set to nullptr somewhere).
-        res.ac_gt_rank = sdsl::rank_support_v5<1>(&res.ac_gt);
-        res.ac_rank = sdsl::rank_support_v5<1>(&res.ac);
-        res.gt_rank = sdsl::rank_support_v5<1>(&res.gt);
+        res.ac_gt_rank = sdsl::rank_support_v<1>(&res.ac_gt);
+        res.ac_rank = sdsl::rank_support_v<1>(&res.ac);
+        res.gt_rank = sdsl::rank_support_v<1>(&res.gt);
         res = merge(res, load_index(fns[i]));
         if (op == "diff") {
             // TODO: investigate why this is needed (the ranks must have gotten set to nullptr somewhere).
-            res.ac_gt_rank = sdsl::rank_support_v5<1>(&res.ac_gt);
-            res.ac_rank = sdsl::rank_support_v5<1>(&res.ac);
-            res.gt_rank = sdsl::rank_support_v5<1>(&res.gt);
+            res.ac_gt_rank = sdsl::rank_support_v<1>(&res.ac_gt);
+            res.ac_rank = sdsl::rank_support_v<1>(&res.ac);
+            res.gt_rank = sdsl::rank_support_v<1>(&res.gt);
             res = merge(res, load_index(fns[i]));
         }
         std::cerr << "Loaded and merged index " << fns[i] << std::endl;
@@ -546,9 +562,9 @@ int ms_op(int argc, char *argv[], std::string op) {
 
 
     // TODO: investigate why this is needed (the ranks must have gotten set to nullptr somewhere).
-    res.ac_gt_rank = sdsl::rank_support_v5<1>(&res.ac_gt);
-    res.ac_rank = sdsl::rank_support_v5<1>(&res.ac);
-    res.gt_rank = sdsl::rank_support_v5<1>(&res.gt);
+    res.ac_gt_rank = sdsl::rank_support_v<1>(&res.ac_gt);
+    res.ac_rank = sdsl::rank_support_v<1>(&res.ac);
+    res.gt_rank = sdsl::rank_support_v<1>(&res.gt);
 
     auto ms = export_ms(res);
 

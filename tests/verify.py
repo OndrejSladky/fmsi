@@ -49,9 +49,9 @@ def assert_correct_results(process, superstring, mask, kmers, k: int):
             continue
         process.stdin.write(f"{kmer}\n".encode())
         process.stdin.flush()
-        output = process.stdout.readline().decode().strip()
-        assert output in ["FOUND", "NOT FOUND"], f"Unexpected output: {output} for kmer {kmer}"
-        present_fmsi = output == "FOUND"
+        total_count, positive_count = map(int, process.stdout.readline().decode().strip().split(","))
+        assert total_count == 1, "Expected only a single k-mer as input to FMSI"
+        present_fmsi = positive_count > 0
         present = f_or(lmbda(superstring, mask, kmer))
         assert present_fmsi == present, f"Expected {present}, got {present_fmsi} for kmer {kmer}"
         print(".", end="")
