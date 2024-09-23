@@ -43,20 +43,25 @@ def create_fmsi_process(file, k):
     return subprocess.Popen([fmsi_path, 'query', '-p', file, '-q', '-', '-k', str(k), '-F'], stdout=subprocess.PIPE, stdin=subprocess.PIPE)
 
 def assert_correct_results(process, superstring, mask, kmers, k: int):
+    results = []
     for i, kmer in enumerate(kmers):
         if len(kmer) != k:
             print(f"Skipping kmer {kmer} of length {len(kmer)}")
             continue
-        process.stdin.write(f"{kmer}\n".encode())
-        process.stdin.flush()
-        total_count, positive_count = map(int, process.stdout.readline().decode().strip().split(","))
-        assert total_count == 1, "Expected only a single k-mer as input to FMSI"
-        present_fmsi = positive_count > 0
+        process.stdin.write(f">\n{kmer}\n".encode())
         present = f_or(lmbda(superstring, mask, kmer))
-        assert present_fmsi == present, f"Expected {present}, got {present_fmsi} for kmer {kmer}"
+        results.append([1, 1 if present else 0])
+    process.stdin.close()
+    index = 0
+    for line in process.stdout:
+        total_count, positive_count = results[index]
+        total_kmers, found_kmers = map(int, line.decode().strip().split(","))
+        assert total_count == total_kmers, f"Expected {total_kmers} kmers, got {total_count}"
+        assert positive_count == found_kmers, f"Expected {found_kmers} positive kmers, got {positive_count}"
         print(".", end="")
-        if i % 100 == 99:
-            print(f" {i+1}/{len(kmers)}")
+        if (index + 1) % 50 == 0:
+            print()
+        index += 1
 
 def generate_random_kmers(k, superstring, num_queries):
     threshold = 0.5 * (len(superstring) > k)
@@ -87,7 +92,8 @@ def main():
         kmers = generate_random_kmers(args.k, superstring, args.num_queries)
     process = create_fmsi_process(args.path, args.k)
     assert_correct_results(process, superstring, mask, kmers, args.k)
-    print("")
+    print()
+    print("OK")
 
 random.seed(42)
 main()

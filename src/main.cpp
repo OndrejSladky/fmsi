@@ -293,37 +293,29 @@ int ms_query(int argc, char *argv[]) {
 
   fms_index index = load_index(fn);
 
-  std::istream *query_stream;
-  std::ifstream query_file;
-  if (query_fn == "-")
-      query_stream = &std::cin;
-  else {
-      query_file = std::ifstream (query_fn);
-      if (!query_file) {
-          std::cerr << "Incorrect path to queries" << std::endl;
-          return usage_query();
-      }
-      query_stream = &query_file;
-  }
-
-  std::string sequence;
+  gzFile fp = OpenFile(query_fn);
+  kseq_t *seq = kseq_init(fp);
   size_t total_kmers = 0;
   size_t found_kmers = 0;
-  while (*query_stream >> sequence) {
-    if (sequence.size() < size_t(k)) {
+  int64_t sequence_length = 0;
+
+  std::cin.tie(&std::cout);
+
+  while ((sequence_length = kseq_read(seq)) >= 0) {
+    size_t current_kmers = std::max(int64_t(0), sequence_length - k + 1);
+    size_t current_found_kmers;
+    if (sequence_length < k) {
         if (flush) {
             std::cout << "0,0" << std::endl;
         }
       continue;
     }
-    size_t current_kmers = sequence.size() - k + 1;
-    size_t current_found_kmers;
     if (f_name == "or") {
-        current_found_kmers = query_kmers<query_mode::orr, false, int64_t>(index, sequence, k);
+        current_found_kmers = query_kmers<query_mode::orr, false, int64_t>(index, seq->seq.s, seq->seq.l, k);
     } else if (f_name == "all") {
-        current_found_kmers = query_kmers<query_mode::all, false, int64_t>(index, sequence, k);
+        current_found_kmers = query_kmers<query_mode::all, false, int64_t>(index, seq->seq.s, seq->seq.l, k);
     } else {
-        current_found_kmers = query_kmers<query_mode::general, false, int64_t>(index, sequence, k, f);
+        current_found_kmers = query_kmers<query_mode::general, false, int64_t>(index, seq->seq.s, seq->seq.l, k, f);
     }
     if (flush) {
         std::cout << current_kmers << "," << current_found_kmers << std::endl;

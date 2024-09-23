@@ -7,6 +7,7 @@
 #include <sdsl/rank_support_v.hpp>
 #include "QSufSort.h"
 #include "functions.h"
+#include "kmers.h"
 
 typedef unsigned char byte;
 
@@ -23,86 +24,6 @@ struct fms_index {
 };
 
 
-static const uint8_t nucleotideToInt[] = {
-        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-        4, 0, 4, 1,  4, 4, 4, 2,  4, 4, 4, 4,  4, 4, 4, 4,
-        4, 4, 4, 4,  3, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-        4, 0, 4, 1,  4, 4, 4, 2,  4, 4, 4, 4,  4, 4, 4, 4,
-        4, 4, 4, 4,  3, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4
-};
-static const char complementaryNucleotide[] = {
-        'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
-        'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
-        'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
-        'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
-        'N', 'T', 'N', 'G',  'N', 'N', 'N', 'C',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
-        'N', 'N', 'N', 'N',  'A', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
-        'N', 't', 'N', 'g',  'N', 'N', 'N', 'c',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
-        'N', 'N', 'N', 'N',  'a', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
-        'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
-        'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
-        'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
-        'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
-        'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
-        'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
-        'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',
-        'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N',  'N', 'N', 'N', 'N'
-};
-
-/// Checkered mask. cmask<uint16_t, 1> is every other bit on
-/// (0x55). cmask<uint16_t,2> is two bits one, two bits off (0x33). Etc.
-/// Copyright: Jellyfish GPL-3.0
-template<typename U, int len, int l = sizeof(U) * 8 / (2 * len)>
-struct cmask {
-    static const U v =
-            (cmask<U, len, l - 1>::v << (2 * len)) | (((U)1 << len) - 1);
-};
-template<typename U, int len>
-struct cmask<U, len, 0> {
-    static const U v = 0;
-};
-
-/// Compute the reverse complement of a word.
-/// Copyright: Jellyfish GPL-3.0
-template <typename U>
-inline U word_reverse_complement(U w) {
-    w = ((w >> 2)  & cmask<U, 2 >::v) | ((w & cmask<U, 2 >::v) << 2);
-    w = ((w >> 4)  & cmask<U, 4 >::v) | ((w & cmask<U, 4 >::v) << 4);
-    w = ((w >> 8)  & cmask<U, 8 >::v) | ((w & cmask<U, 8 >::v) << 8);
-    w = ((w >> 16) & cmask<U, 16>::v) | ((w & cmask<U, 16>::v) << 16);
-    w = ( w >> 32                   ) | ( w                    << 32);
-    return ((U)-1) - w;
-}
-
-/// Compute the reverse complement of the given k-mer.
-template <typename kmer_t>
-kmer_t ReverseComplement(kmer_t kMer, int k) {
-    return (((kmer_t)word_reverse_complement(kMer)) >> ((sizeof(kMer)<<3) - (k << 1))) & ((kmer_t(1) << (k << 1)) - kmer_t(1));
-}
-
-std::string ReverseComplementString(const std::string& s) {
-    std::string ret(s.size(), 'N');
-    for (size_t i = 0; i < s.size(); ++i) {
-        ret[s.size() - i - 1] = complementaryNucleotide[(uint8_t)s[i]];
-    }
-    return ret;
-}
-
-
-inline bool is_upper(char c) {
-    return c >= 'A' && c <= 'Z';
-}
 
 size_t rank(const fms_index& index, size_t i, byte c) {
     auto gt_position = index.ac_gt_rank(i);
@@ -200,20 +121,20 @@ std::pair<size_t, size_t> single_query_general(const fms_index& index, T pattern
 }
 
 template <bool maximized_ones = false, typename T>
-std::vector<bool> query_kmers_streaming_forward_or(const fms_index& index, std::string pattern, int k) {
+std::vector<bool> query_kmers_streaming_forward_or(const fms_index& index, char* sequence, size_t sequence_length, int k) {
     T kmer = 0;
     for (int i = 0; i < k; ++i) {
-        kmer = (kmer << 2) | nucleotideToInt[(uint8_t)pattern[i]];
+        kmer = (kmer << 2) | nucleotideToInt[(uint8_t)sequence[i]];
     }
-    std::vector<bool> result (pattern.size() - k + 1);
+    std::vector<bool> result (sequence_length - k + 1);
     size_t sa_start = -1, sa_end = -1;
     result[0] = single_query_or<maximized_ones>(index, kmer, k, sa_start, sa_end);
     // Robust mask working even for k power of 2.
     T kmers_mask = (1 << (2 * k - 1));
     kmers_mask = kmers_mask | (kmers_mask - 1);
 
-    for (size_t i = k; i < pattern.size(); ++i) {
-        kmer = (kmer << 2) | nucleotideToInt[(uint8_t)pattern[i]];
+    for (size_t i = k; i < sequence_length; ++i) {
+        kmer = (kmer << 2) | nucleotideToInt[(uint8_t)sequence[i]];
         kmer &= kmers_mask;
         result[i - k + 1] = single_query_or<maximized_ones>(index, kmer, k, sa_start, sa_end);
     }
@@ -228,14 +149,14 @@ enum class query_mode {
 };
 
 template <query_mode mode, typename T>
-size_t query_kmers_single_bidir(const fms_index& index, std::string pattern, int k, demasking_function_t f) {
+size_t query_kmers_single_bidir(const fms_index& index, char* sequence, size_t sequence_length, int k, demasking_function_t f) {
     T kmer = 0;
     for (int i = 0; i < k - 1; ++i) {
-        kmer = (kmer << 2) | nucleotideToInt[(uint8_t)pattern[i]];
+        kmer = (kmer << 2) | nucleotideToInt[(uint8_t)sequence[i]];
     }
     size_t result = 0;
-    for (size_t i = k - 1; i < pattern.size(); ++i) {
-        kmer = (kmer << 2) | nucleotideToInt[(uint8_t)pattern[i]];
+    for (size_t i = k - 1; i < sequence_length; ++i) {
+        kmer = (kmer << 2) | nucleotideToInt[(uint8_t)sequence[i]];
         if constexpr (mode != query_mode::general) {
             int got;
             if constexpr (mode == query_mode::orr) {
@@ -270,11 +191,11 @@ size_t query_kmers_single_bidir(const fms_index& index, std::string pattern, int
 }
 
 template <query_mode mode, bool has_klcp, typename T>
-size_t query_kmers(const fms_index& index, std::string pattern, int k, demasking_function_t f = nullptr) {
+size_t query_kmers(const fms_index& index, char* sequence, size_t sequence_length, int k, demasking_function_t f = nullptr) {
     if constexpr (has_klcp && mode != query_mode::general) {
-        std::vector<bool> result = query_kmers_streaming_forward_or<T>(index, pattern, k);
-        pattern = ReverseComplementString(pattern);
-        std::vector<bool> result_rev = query_kmers_streaming_forward_or<T>(index, pattern, k);
+        std::vector<bool> result = query_kmers_streaming_forward_or<T>(index, sequence, sequence_length, k);
+        ReverseComplementString(sequence, sequence_length);
+        std::vector<bool> result_rev = query_kmers_streaming_forward_or<T>(index, sequence, sequence_length, k);
         size_t ret = 0;
         for (size_t i = 0; i < result.size(); ++i) {
             if (result[i] || result_rev[result.size() - i - 1]) {
@@ -283,7 +204,7 @@ size_t query_kmers(const fms_index& index, std::string pattern, int k, demasking
         }
         return ret;
     } else {
-        return query_kmers_single_bidir<mode, T>(index, pattern, k, f);
+        return query_kmers_single_bidir<mode, T>(index, sequence, sequence_length, k, f);
     }
 }
 

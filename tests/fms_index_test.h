@@ -131,7 +131,7 @@ namespace {
         };
 
         for (auto t: tests) {
-            auto got_result = query_kmers<query_mode::orr, false, int64_t>(index, t.query, t.query.size());
+            auto got_result = query_kmers<query_mode::orr, false, int64_t>(index, t.query.data(), t.query.length(), t.query.size());
 
             EXPECT_EQ(got_result, t.want_result);
         }
@@ -151,7 +151,7 @@ namespace {
         };
 
         for (auto t: tests) {
-            auto got_result = query_kmers<query_mode::orr, false, int64_t>(index, t.query, t.query.size());
+            auto got_result = query_kmers<query_mode::orr, false, int64_t>(index, t.query.data(), t.query.length(), t.query.size());
 
             EXPECT_EQ(got_result, t.want_result);
         }
