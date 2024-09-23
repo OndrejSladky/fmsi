@@ -289,6 +289,9 @@ int ms_query(int argc, char *argv[]) {
   } else if (k == 0) {
     std::cerr << "k is a required argument." << std::endl;
     return usage_query();
+  } else if (k > 64) {
+    std::cerr << "k cannot be greater than 64." << std::endl;
+    return usage_query();
   }
 
   fms_index index = load_index(fn);
@@ -311,14 +314,29 @@ int ms_query(int argc, char *argv[]) {
         int64_t current_length = next_invalid_character_or_end(sequence, sequence_length);
         if (current_length >= k) {
             if (f_name == "or") {
-                current_found_kmers += query_kmers<query_mode::orr, false, int64_t>(index, seq->seq.s, current_length,
-                                                                                   k);
+                if (k <= 32) {
+                    current_found_kmers += query_kmers<query_mode::orr, false, int64_t>(index, seq->seq.s,
+                                                                                        current_length, k);
+                } else {
+                    current_found_kmers += query_kmers<query_mode::orr, false, __int128>(index, seq->seq.s,
+                                                                                       current_length, k);
+                }
             } else if (f_name == "all") {
-                current_found_kmers += query_kmers<query_mode::all, false, int64_t>(index, seq->seq.s, current_length,
-                                                                                   k);
+                if (k <= 32) {
+                    current_found_kmers += query_kmers<query_mode::all, false, int64_t>(index, seq->seq.s,
+                                                                                        current_length, k);
+                } else {
+                    current_found_kmers += query_kmers<query_mode::all, false, __int128>(index, seq->seq.s,
+                                                                                       current_length, k);
+                }
             } else {
-                current_found_kmers += query_kmers<query_mode::general, false, int64_t>(index, seq->seq.s,
-                                                                                       current_length, k, f);
+                if (k <= 32) {
+                    current_found_kmers += query_kmers<query_mode::general, false, int64_t>(index, seq->seq.s,
+                                                                                           current_length, k, f);
+                } else {
+                    current_found_kmers += query_kmers<query_mode::general, false, __int128>(index, seq->seq.s,
+                                                                                           current_length, k, f);
+                }
             }
             current_valid_kmers += current_length - k + 1;
         }
