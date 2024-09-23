@@ -296,6 +296,7 @@ int ms_query(int argc, char *argv[]) {
   gzFile fp = OpenFile(query_fn);
   kseq_t *seq = kseq_init(fp);
   size_t total_kmers = 0;
+  size_t valid_kmers = 0;
   size_t found_kmers = 0;
   int64_t sequence_length = 0;
 
@@ -303,29 +304,40 @@ int ms_query(int argc, char *argv[]) {
 
   while ((sequence_length = kseq_read(seq)) >= 0) {
     size_t current_kmers = std::max(int64_t(0), sequence_length - k + 1);
-    size_t current_found_kmers;
-    if (sequence_length < k) {
-        if (flush) {
-            std::cout << "0,0" << std::endl;
+    size_t current_valid_kmers = 0;
+    size_t current_found_kmers = 0;
+    auto sequence = seq->seq.s;
+    while (sequence_length > 0) {
+        int64_t current_length = next_invalid_character_or_end(sequence, sequence_length);
+        if (current_length >= k) {
+            if (f_name == "or") {
+                current_found_kmers += query_kmers<query_mode::orr, false, int64_t>(index, seq->seq.s, current_length,
+                                                                                   k);
+            } else if (f_name == "all") {
+                current_found_kmers += query_kmers<query_mode::all, false, int64_t>(index, seq->seq.s, current_length,
+                                                                                   k);
+            } else {
+                current_found_kmers += query_kmers<query_mode::general, false, int64_t>(index, seq->seq.s,
+                                                                                       current_length, k, f);
+            }
+            current_valid_kmers += current_length - k + 1;
         }
-      continue;
-    }
-    if (f_name == "or") {
-        current_found_kmers = query_kmers<query_mode::orr, false, int64_t>(index, seq->seq.s, seq->seq.l, k);
-    } else if (f_name == "all") {
-        current_found_kmers = query_kmers<query_mode::all, false, int64_t>(index, seq->seq.s, seq->seq.l, k);
-    } else {
-        current_found_kmers = query_kmers<query_mode::general, false, int64_t>(index, seq->seq.s, seq->seq.l, k, f);
+        // Skip also the next character.
+        sequence_length -= current_length + 1;
+        sequence += current_length + 1;
     }
     if (flush) {
-        std::cout << current_kmers << "," << current_found_kmers << std::endl;
+        std::cout << current_kmers << "," << current_valid_kmers << "," << current_found_kmers << std::endl;
     }
     total_kmers += current_kmers;
+    valid_kmers += current_valid_kmers;
     found_kmers += current_found_kmers;
   }
   if (!flush) {
       std::cout << "Total k-mers: " << total_kmers << std::endl;
-      std::cout << "Found k-mers: " << found_kmers << " (" << 100.0 * found_kmers / total_kmers << "% of total k-mers)"
+        std::cout << "Valid k-mers: " << valid_kmers << " (" << 100.0 * valid_kmers / total_kmers << "% of total k-mers)"
+                    << std::endl;
+      std::cout << "Found k-mers: " << found_kmers << " (" << 100.0 * found_kmers / valid_kmers << "% of valid k-mers)"
                 << std::endl;
   }
   return 0;

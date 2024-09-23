@@ -49,14 +49,16 @@ def assert_correct_results(process, superstring, mask, kmers, k: int):
             print(f"Skipping kmer {kmer} of length {len(kmer)}")
             continue
         process.stdin.write(f">\n{kmer}\n".encode())
+        valid = not any(c not in "ACGT" for c in kmer)
         present = f_or(lmbda(superstring, mask, kmer))
-        results.append([1, 1 if present else 0])
+        results.append([1, 1 if valid else 0, 1 if present else 0])
     process.stdin.close()
     index = 0
     for line in process.stdout:
-        total_count, positive_count = results[index]
-        total_kmers, found_kmers = map(int, line.decode().strip().split(","))
+        total_count, valid_count, positive_count = results[index]
+        total_kmers, valid_kmers, found_kmers = map(int, line.decode().strip().split(","))
         assert total_count == total_kmers, f"Expected {total_kmers} kmers, got {total_count}"
+        assert valid_count == valid_kmers, f"Expected {valid_kmers} valid kmers, got {valid_count}"
         assert positive_count == found_kmers, f"Expected {found_kmers} positive kmers, got {positive_count}"
         print(".", end="")
         if (index + 1) % 50 == 0:
