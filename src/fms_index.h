@@ -58,7 +58,7 @@ struct fms_index {
     strand_predictor predictor = strand_predictor();
 };
 
-size_t rank(const fms_index& index, size_t i, byte c) {
+inline size_t rank(const fms_index& index, size_t i, byte c) {
     auto gt_position = index.ac_gt_rank(i);
     if (c >= 2) { // G/T
         auto t_position = index.gt_rank(gt_position);
@@ -78,7 +78,7 @@ size_t rank(const fms_index& index, size_t i, byte c) {
     }
 }
 
-byte access(const fms_index& index, size_t i) {
+inline byte access(const fms_index& index, size_t i) {
     auto gt_position = index.ac_gt_rank(i);
     if (index.ac_gt[i]) {
         return 2 + index.gt[gt_position];
@@ -87,14 +87,14 @@ byte access(const fms_index& index, size_t i) {
     }
 }
 
-void update_range(const fms_index& index, size_t& i, size_t& j, byte c) {
+inline void update_range(const fms_index& index, size_t& i, size_t& j, byte c) {
     if (j == i) return;
     auto count = index.counts[c];
     i = count + rank(index, i, c);
     j = count + rank(index, j, c);
 }
 
-void extend_range_with_klcp(const fms_index& index, size_t& i, size_t& j) {
+inline void extend_range_with_klcp(const fms_index& index, size_t& i, size_t& j) {
     while(index.klcp[j-1]) j++;
     while(index.klcp[i-1]) i--;
 
@@ -108,13 +108,13 @@ void get_range_with_pattern(const fms_index& index, size_t &sa_start, size_t &sa
     sa_start = 0;
     sa_end = index.sa_transformed_mask.size();
     // Find the SA coordinates of the forward pattern.
-    for (int i = k-1; i >= 0; --i) {
+    for (int i = k-1; i >= 0 && sa_start != sa_end; --i) {
         update_range(index, sa_start, sa_end, nucleotideToInt[(uint8_t)pattern[i]]);
     }
 }
 
 template <bool maximized_ones=false>
-int infer_presence(const fms_index& index, size_t sa_start, size_t sa_end) {
+inline int infer_presence(const fms_index& index, size_t sa_start, size_t sa_end) {
     // Separately optimize all-or-nothing and or.
     if constexpr (maximized_ones) {
         if (sa_start != sa_end) return index.sa_transformed_mask[sa_start];
