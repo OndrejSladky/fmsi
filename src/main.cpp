@@ -41,6 +41,10 @@ static int usage_index() {
   std::cerr << "  `-p path_to_fasta` - The path to the fasta file with masked "
                "superstring to be indexed. This is a required argument."
             << std::endl;
+  std::cerr << "  `-k value_of_k`    - The size of queried k-mers. Required."
+            << std::endl;
+  std::cerr << "  `-s`               - Do not optimize for streaming queries."
+            << std::endl;
   std::cerr << "  `-h`               - Prints this help and terminates."
             << std::endl;
   return 1;
@@ -191,8 +195,9 @@ int ms_index(int argc, char *argv[]) {
   std::string fn;
   // For backwards compatibility.
   bool l_param_set = false;
-  bool k_param_set = false;
-  while ((c = getopt(argc, argv, "p:l:hk:")) >= 0) {
+  int k = 0;
+  bool no_streaming = false;
+  while ((c = getopt(argc, argv, "p:l:hk:s")) >= 0) {
     switch (c) {
     case 'l':
       l_param_set = true;
@@ -201,10 +206,13 @@ int ms_index(int argc, char *argv[]) {
       usage = true;
       break;
     case 'k':
-      k_param_set = true;
+      k = atoi(optarg);
       break;
     case 'p':
       fn = optarg;
+      break;
+    case 's':
+      no_streaming = true;
       break;
     default:
       return usage_index();
@@ -216,9 +224,6 @@ int ms_index(int argc, char *argv[]) {
   } else if (fn.empty()) {
     std::cerr << "Path to the fasta file is a required argument." << std::endl;
     return usage_index();
-  }
-  if (k_param_set) {
-    std::cerr << "WARNING: Parameter -k is ignored." << std::endl;
   }
   if (l_param_set) {
       std::cerr << "WARNING: Parameter -l is ignored." << std::endl;
@@ -234,7 +239,7 @@ int ms_index(int argc, char *argv[]) {
     return usage_index();
   }
   std::cerr << "Read masked superstring" << std::endl;
-  fms_index index = construct(ms);
+  fms_index index = construct<int64_t>(ms, k, !no_streaming);
   std::cerr << "Constructed index" << std::endl;
   dump_index(index, fn);
   std::cerr << "Written index" << std::endl;
@@ -295,6 +300,7 @@ int ms_query(int argc, char *argv[]) {
   }
 
   fms_index index = load_index(fn);
+  bool has_klcp = index.klcp.size() > 0;
 
   gzFile fp = OpenFile(query_fn);
   kseq_t *seq = kseq_init(fp);
@@ -314,29 +320,11 @@ int ms_query(int argc, char *argv[]) {
         int64_t current_length = next_invalid_character_or_end(sequence, sequence_length);
         if (current_length >= k) {
             if (f_name == "or") {
-                if (k <= 32) {
-                    current_found_kmers += query_kmers<query_mode::orr, false, int64_t>(index, seq->seq.s,
-                                                                                        current_length, k);
-                } else {
-                    current_found_kmers += query_kmers<query_mode::orr, false, __int128>(index, seq->seq.s,
-                                                                                       current_length, k);
-                }
+                current_found_kmers += query_kmers<query_mode::orr>(index, seq->seq.s,current_length, k, has_klcp);
             } else if (f_name == "all") {
-                if (k <= 32) {
-                    current_found_kmers += query_kmers<query_mode::all, false, int64_t>(index, seq->seq.s,
-                                                                                        current_length, k);
-                } else {
-                    current_found_kmers += query_kmers<query_mode::all, false, __int128>(index, seq->seq.s,
-                                                                                       current_length, k);
-                }
+                current_found_kmers += query_kmers<query_mode::all>(index, seq->seq.s, current_length, k, has_klcp);
             } else {
-                if (k <= 32) {
-                    current_found_kmers += query_kmers<query_mode::general, false, int64_t>(index, seq->seq.s,
-                                                                                           current_length, k, f);
-                } else {
-                    current_found_kmers += query_kmers<query_mode::general, false, __int128>(index, seq->seq.s,
-                                                                                           current_length, k, f);
-                }
+                current_found_kmers += query_kmers<query_mode::general>(index, seq->seq.s,current_length, k, has_klcp, f);
             }
             current_valid_kmers += current_length - k + 1;
         }
@@ -490,7 +478,7 @@ int ms_normalize(int argc, char *argv[]) {
     std::cout << ms << std::endl;
     return 0;
   }
-  dump_index(construct(ms), fn);
+  dump_index(construct<int64_t>(ms, k, false), fn);
   std::cerr << "Written index" << std::endl;
   return 0;
 }
@@ -600,7 +588,7 @@ int ms_op(int argc, char *argv[], std::string op) {
     ms = normalize(ms, k, function);
     std::cerr << "Compacted result" << std::endl;
 
-    dump_index(construct(ms), result_fn);
+    dump_index(construct<int64_t>(ms, k, false), result_fn);
     std::cerr << "Result written" << std::endl;
     return 0;
 }
