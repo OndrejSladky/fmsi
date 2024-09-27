@@ -41,7 +41,8 @@ static int usage_index() {
   std::cerr << "  `-p path_to_fasta` - The path to the fasta file with masked "
                "superstring to be indexed. This is a required argument."
             << std::endl;
-  std::cerr << "  `-k value_of_k`    - The size of queried k-mers. Required."
+  std::cerr << "  `-k value_of_k`    - The size of queried k-mers. If not set,"
+               "automatically inferred from number of trailing mask zeros."
             << std::endl;
   std::cerr << "  `-s`               - Do not optimize for streaming queries."
             << std::endl;
@@ -75,7 +76,7 @@ static int usage_op(std::string op) {
     std::cerr << "  `-r path_of_result` - The path where the result should be "
                  "stored. This is a required argument."
               << std::endl;
-    std::cerr << "  `-k value_of_k` - The size of queried k-mers. Required."
+    std::cerr << "  `-k value_of_k` - The size of queried k-mers (only used to check with the index one)."
               << std::endl;
     std::cerr << "  `-h`                - Prints this help and terminates."
               << std::endl;
@@ -96,7 +97,8 @@ static int usage_query() {
   std::cerr << "  `-q path_to_queries` - The path to the file with k-mers to "
                "query. Set '-' for standard input (default)."
             << std::endl;
-  std::cerr << "  `-k value_of_k` - The size of queried k-mers. Required."
+  std::cerr << "  `-k value_of_k` - The size of queried k-mers. If not set,"
+               "automatically inferred from the index. Only used for automatic k validation"
             << std::endl;
   std::cerr << "  `-f function`      - A function to determine whether a "
                "$k$-mer is represented based on the number of set and unset "
@@ -131,7 +133,7 @@ static int usage_normalize() {
   std::cerr << "  `-p path_to_fasta` - The path to the fasta file from which "
                "the index was created. Required."
             << std::endl;
-  std::cerr << "  `-k value_of_k` - The size of queried k-mers. Required."
+  std::cerr << "  `-k value_of_k` - The size of queried k-mers."
             << std::endl;
   std::cerr << "  `-f function`      - A function to determine whether a "
                "$k$-mer is represented based on the number of set and unset "
@@ -239,7 +241,21 @@ int ms_index(int argc, char *argv[]) {
     return usage_index();
   }
   std::cerr << "Read masked superstring" << std::endl;
-  fms_index index = construct<int64_t>(ms, k, !no_streaming);
+  int inferred_k = infer_k(ms);
+  if (k == 0) {
+    k = inferred_k;
+    std::cerr << "Inferred k from the masked case convention: " << k << std::endl;
+  }
+  if (k != inferred_k) {
+      std::cerr << "WARNING: The provided k (" << k << ") does not match the k inferred from the mask convention (" << inferred_k << "). The provided k is used but we recommend double checking that it is correct." << std::endl;
+  }
+  if (k > 64 && !no_streaming) {
+      std::cerr << "WARNING: Construction of kLCP array for streaming support is only available for k <= 64. The index will be constructed without streaming support, which might result in slower positive streaming queries." << std::endl;
+      no_streaming = true;
+  }
+  fms_index index;
+  if (k <= 32) index = construct<uint64_t>(ms, k, !no_streaming);
+  else index = construct<__uint128_t>(ms, k, !no_streaming);
   std::cerr << "Constructed index" << std::endl;
   dump_index(index, fn);
   std::cerr << "Written index" << std::endl;
@@ -291,16 +307,18 @@ int ms_query(int argc, char *argv[]) {
   } else if (fn.empty()) {
     std::cerr << "Path to the fasta file is a required argument." << std::endl;
     return usage_query();
-  } else if (k == 0) {
-    std::cerr << "k is a required argument." << std::endl;
-    return usage_query();
-  } else if (k > 64) {
-    std::cerr << "k cannot be greater than 64." << std::endl;
-    return usage_query();
   }
 
   fms_index index = load_index(fn);
   bool has_klcp = index.klcp.size() > 0;
+  int index_k = index.k;
+  if (k != 0 && k != index_k) {
+    std::cerr << "Mismatch. Provided k (" << k << ") does not match the k of the index (" << index_k << ")." << std::endl;
+    return usage_query();
+  }
+  if (k == 0) {
+    k = index_k;
+  }
 
   gzFile fp = OpenFile(query_fn);
   kseq_t *seq = kseq_init(fp);
@@ -340,7 +358,7 @@ int ms_query(int argc, char *argv[]) {
     found_kmers += current_found_kmers;
   }
   if (!flush) {
-      std::cout << "Total k-mers: " << total_kmers << std::endl;
+      std::cout << "Total k-mers: " << total_kmers <<  "(k=" << k << ")" << std::endl;
         std::cout << "Valid k-mers: " << valid_kmers << " (" << 100.0 * valid_kmers / total_kmers << "% of total k-mers)"
                     << std::endl;
       std::cout << "Found k-mers: " << found_kmers << " (" << 100.0 * found_kmers / valid_kmers << "% of valid k-mers)"
@@ -397,7 +415,12 @@ int ms_merge(int argc, char *argv[]) {
       res.ac_gt_rank = sdsl::rank_support_v<1>(&res.ac_gt);
       res.ac_rank = sdsl::rank_support_v<1>(&res.ac);
       res.gt_rank = sdsl::rank_support_v<1>(&res.gt);
-      res = merge(res, load_index(fns[i]));
+      auto current = load_index(fns[i]);
+      if (res.k != current.k) {
+          std::cerr << "Mismatch. The k of the index " << fns[i] << " (" << current.k << ") does not match the k of the index " << fns[0] << "(" << res.k << ")." << std::endl;
+          return usage_merge();
+      }
+      res = merge(res, current);
       std::cerr << "Loaded and merged index " << fns[i] << std::endl;
   }
 
@@ -456,10 +479,6 @@ int ms_normalize(int argc, char *argv[]) {
     std::cerr << "Path to the fasta file is a required argument." << std::endl;
     return usage_normalize();
   }
-    if (k == 0) {
-        std::cerr << "Size of k-mer is a required argument." << std::endl;
-        return usage_normalize();
-    }
     if (l_param_used) {
         std::cerr << "WARNING: Parameter -l is ignored." << std::endl;
     }
@@ -469,16 +488,22 @@ int ms_normalize(int argc, char *argv[]) {
 
   std::cerr << "Starting " << fn << std::endl;
   fms_index index = load_index(fn);
+    if (k != 0 && k != index.k) {
+        std::cerr << "Provided k-mer size (" << k << ") does not match the one of the index (" << index.k << ")." << std::endl;
+        return usage_normalize();
+    }
   std::cerr << "Loaded index" << std::endl;
   auto ms = export_ms(index);
-  ms = normalize(ms, k, f);
+  ms = normalize(ms, index.k, f);
   std::cerr << "Compacted" << std::endl;
   if (only_print) {
     std::cout << ">exported f-masked superstring" << std::endl;
     std::cout << ms << std::endl;
     return 0;
   }
-  dump_index(construct<int64_t>(ms, k, false), fn);
+    if (index.k <= 32) index = construct<uint64_t>(ms, index.k, index.klcp.size() > 0);
+    else index = construct<__uint128_t>(ms, index.k, index.klcp.size() > 0);
+  dump_index(index, fn);
   std::cerr << "Written index" << std::endl;
   return 0;
 }
@@ -546,13 +571,13 @@ int ms_op(int argc, char *argv[], std::string op) {
         std::cerr << "Path to the result file is a required argument." << std::endl;
         return usage_op(op);
     }
-    if (k == 0) {
-        std::cerr << "Size of k-mer is a required argument." << std::endl;
+    fms_index res = load_index(fns[0]);
+    std::cerr << "Loaded index " << fns[0] << std::endl;
+    if (k != 0 && k != res.k) {
+        std::cerr << "Provided k (." << k << ") does not match the k of the first index (" << res.k << ")." << std::endl;
         return usage_op(op);
     }
 
-    fms_index res = load_index(fns[0]);
-    std::cerr << "Loaded index " << fns[0] << std::endl;
 
     for (size_t i = 1; i < fns.size(); ++i) {
         // TODO: investigate why this is needed (the ranks must have gotten set to nullptr somewhere).
@@ -585,10 +610,13 @@ int ms_op(int argc, char *argv[], std::string op) {
     else if (op == "inter") function = mask_function(std::to_string(fns.size()) + "-" + std::to_string(fns.size()), true);
     assert(function != nullptr);
 
-    ms = normalize(ms, k, function);
+    ms = normalize(ms, res.k, function);
     std::cerr << "Compacted result" << std::endl;
 
-    dump_index(construct<int64_t>(ms, k, false), result_fn);
+    if (res.k <= 32) res = construct<uint64_t>(ms, res.k, res.klcp.size() > 0);
+    else res = construct<__uint128_t>(ms, res.k, res.klcp.size() > 0);
+
+    dump_index(res, result_fn);
     std::cerr << "Result written" << std::endl;
     return 0;
 }

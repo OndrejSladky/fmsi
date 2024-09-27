@@ -25,6 +25,7 @@ struct fms_index {
     sdsl::bit_vector klcp;
     sdsl::rank_support_v<0> klcp_rank;
     sdsl::select_support_mcl<0> klcp_select;
+    int k;
 };
 
 
@@ -308,6 +309,8 @@ fms_index construct(std::string ms, int k, bool use_klcp) {
     index.ac_rank = sdsl::rank_support_v<1>(&index.ac);
     index.gt_rank = sdsl::rank_support_v<1>(&index.gt);
 
+    index.k = k;
+
     return index;
 }
 
@@ -325,7 +328,11 @@ std::string export_ms(const fms_index& index) {
 }
 
 fms_index merge(const fms_index& a, const fms_index& b) {
-    return construct<uint64_t>(export_ms(a) + export_ms(b), 31, false);
+    if (a.k <= 32)  {
+        return construct<uint64_t>(export_ms(a) + export_ms(b), a.k, a.klcp.size() > 0);
+    } else {
+        return construct<__uint128_t>(export_ms(a) + export_ms(b), a.k, a.klcp.size() > 0);
+    }
 }
 
 void dump_index(const fms_index& index, const std::string &fn) {
@@ -340,6 +347,7 @@ void dump_index(const fms_index& index, const std::string &fn) {
     for (auto c : index.counts) {
         out << c << std::endl;
     }
+    out << index.k << std::endl;
     out.close();
 }
 
@@ -365,6 +373,7 @@ fms_index load_index(const std::string &fn) {
         in >> c;
         index.counts.push_back(c);
     }
+    in >> index.k;
     in.close();
     return index;
 }

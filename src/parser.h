@@ -27,20 +27,31 @@ gzFile OpenFile(std::string &path) {
 }
 
 
+/// Obtain k based on the mask convention of k-1 trailing zeros.
+int infer_k(std::string ms) {
+    int k = 1;
+    while(!is_upper(ms[ms.size() - k])) {
+        k++;
+    }
+    return k;
+}
+
+
 /// Load masked superstring from the fasta file in the mask-cased format.
 std::string read_masked_superstring(std::string fn) {
     gzFile fp = OpenFile(fn);
     kseq_t *seq = kseq_init(fp);
-    std::vector<char> ret;
-  int64_t l;
-  while ((l = kseq_read(seq)) >= 0) {
-    for (int64_t i = 0; i < l; ++i) {
-      ret.push_back(seq->seq.s[i]);
-    }
+  int64_t l = kseq_read(seq);
+  if (l < 0) {
+    throw std::invalid_argument("Error reading the fasta file. The fasta file should contain a single entry - the masked superstring.");
+  }
+  std::string ret = std::string (seq->seq.s, seq->seq.s + l);
+  if ((l = kseq_read(seq)) >= 0) {
+    std::cerr << "Warning: The fasta file contains more than one entry. Only the first entry will be used." << std::endl;
   }
   kseq_destroy(seq);
   gzclose(fp);
-  return std::string(ret.begin(), ret.end());
+  return ret;
 }
 
 size_t next_invalid_character_or_end(char* sequence, size_t length) {
