@@ -51,13 +51,10 @@ namespace {
                 std::vector<size_t>({1, 4, 7, 7}),
                 5,
                 sdsl::bit_vector({0, 1, 0, 0, 1, 1, 0, 0}),
-                sdsl::rank_support_v<0>(),
         };
         ret.ac_gt_rank.set_vector(&ret.ac_gt);
         ret.ac_rank.set_vector(&ret.ac);
         ret.gt_rank.set_vector(&ret.gt);
-        ret.klcp_rank.set_vector(&ret.klcp);
-        ret.klcp_select = sdsl::select_support_mcl<0>(&ret.klcp);
         return ret;
     }
 
@@ -136,7 +133,6 @@ namespace {
 
     TEST(FMS_INDEX, EXTEND_RANGE_WITH_KLCP) {
         auto index = get_dummy_index3();
-        index.klcp_select.set_vector(&index.klcp);
         struct test_case {
             size_t i;
             size_t j;

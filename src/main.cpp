@@ -358,7 +358,7 @@ int ms_query(int argc, char *argv[]) {
     found_kmers += current_found_kmers;
   }
   if (!flush) {
-      std::cout << "Total k-mers: " << total_kmers <<  "(k=" << k << ")" << std::endl;
+      std::cout << "Total k-mers: " << total_kmers <<  " (k=" << k << ")" << std::endl;
         std::cout << "Valid k-mers: " << valid_kmers << " (" << 100.0 * valid_kmers / total_kmers << "% of total k-mers)"
                     << std::endl;
       std::cout << "Found k-mers: " << found_kmers << " (" << 100.0 * found_kmers / valid_kmers << "% of valid k-mers)"

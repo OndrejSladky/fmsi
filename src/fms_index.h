@@ -23,8 +23,6 @@ struct fms_index {
     std::vector<size_t> counts;
     size_t dollar_position;
     sdsl::bit_vector klcp;
-    sdsl::rank_support_v<0> klcp_rank;
-    sdsl::select_support_mcl<0> klcp_select;
     int k;
 };
 
@@ -136,9 +134,13 @@ size_t query_kmers_streaming(const fms_index& index, char* sequence, char* rc_se
         }
         result[i_back] = infer_presence<maximized_ones>(index, sa_start, sa_end);
     }
-    // TODO: do this in a smarter way.
     sa_start = sa_end = -1;
     for (size_t i = 0; i <= sequence_length - k; ++i) {
+        if (result[i] == 1 || (result[i] == 0 && maximized_ones)) {
+            // This position can be skipped for performance.
+            sa_start = sa_end = -1;
+            continue;
+        }
         size_t i_back = sequence_length - k - i;
         if (sa_start == sa_end) {
             get_range_with_pattern(index, sa_start, sa_end, rc_sequence + i_back, k);
@@ -264,8 +266,6 @@ fms_index construct(std::string ms, int k, bool use_klcp) {
 
     if (use_klcp) {
         index.klcp = construct_klcp<T>(isa, ms, k-1);
-        index.klcp_rank = sdsl::rank_support_v<0>(&index.klcp);
-        index.klcp_select = sdsl::select_support_mcl<0>(&index.klcp);
     }
 
     sdsl::bit_vector sa_transformed_mask(ms.size() + 1);
@@ -363,8 +363,6 @@ fms_index load_index(const std::string &fn) {
     sdsl::load_from_file(index.sa_transformed_mask, basename + ".mask");
     if (std::filesystem::exists(basename + ".klcp")) {
         sdsl::load_from_file(index.klcp, basename + ".klcp");
-        index.klcp_rank = sdsl::rank_support_v<0>(&index.klcp);
-        index.klcp_select = sdsl::select_support_mcl<0>(&index.klcp);
     }
     std::ifstream in(basename + ".misc");
     in >> index.dollar_position;
