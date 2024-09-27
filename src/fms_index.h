@@ -12,6 +12,37 @@
 
 typedef unsigned char byte;
 
+struct strand_predictor {
+    int score = 0;
+    int* result_scores = new int[2] {0, 0};
+    int previous = -1;
+
+    int clipped(int x) {
+        return std::max(-7, std::min(7, x));
+    }
+
+    void log_result (int forward_query_result, int reverse_query_result) {
+        int difference = forward_query_result - reverse_query_result;
+        score += difference;
+        score = clipped(score);
+
+        if (previous != -1) {
+            result_scores[previous] += difference;
+            result_scores[previous] = clipped(result_scores[previous]);
+        }
+
+        previous = forward_query_result > reverse_query_result;
+    }
+
+    bool predict_swap() {
+        if (previous != -1 && result_scores[previous] != 0) {
+            return result_scores[previous] < 0;
+        } else {
+            return score < 0;
+        }
+    }
+};
+
 struct fms_index {
     sdsl::bit_vector ac_gt;
     sdsl::rank_support_v<1> ac_gt_rank;
@@ -24,9 +55,8 @@ struct fms_index {
     size_t dollar_position;
     sdsl::bit_vector klcp;
     int k;
+    strand_predictor predictor = strand_predictor();
 };
-
-
 
 size_t rank(const fms_index& index, size_t i, byte c) {
     auto gt_position = index.ac_gt_rank(i);
@@ -104,13 +134,13 @@ int infer_presence(const fms_index& index, size_t sa_start, size_t sa_end) {
 }
 
 template <bool maximized_ones=false>
-int single_query_or(const fms_index& index, char* pattern, int k) {
+int single_query_or(fms_index& index, char* pattern, int k) {
     size_t sa_start = -1, sa_end = -1;
     get_range_with_pattern(index, sa_start, sa_end, pattern, k);
     return infer_presence<maximized_ones>(index, sa_start, sa_end);
 }
 
-std::pair<size_t, size_t> single_query_general(const fms_index& index, char* pattern, int k) {
+std::pair<size_t, size_t> single_query_general(fms_index& index, char* pattern, int k) {
     size_t sa_start, sa_end;
     get_range_with_pattern(index, sa_start, sa_end, pattern, k);
     size_t ones = 0;
@@ -121,7 +151,7 @@ std::pair<size_t, size_t> single_query_general(const fms_index& index, char* pat
 }
 
 template <bool maximized_ones = false>
-size_t query_kmers_streaming(const fms_index& index, char* sequence, char* rc_sequence, size_t sequence_length, int k) {
+size_t query_kmers_streaming(fms_index& index, char* sequence, char* rc_sequence, size_t sequence_length, int k) {
     std::vector<signed char> result (sequence_length - k + 1);
     size_t sa_start = -1, sa_end = -1;
     for (size_t i = 0; i <= sequence_length - k; ++i) {
@@ -161,11 +191,16 @@ enum class query_mode {
 };
 
 template <query_mode mode>
-size_t query_kmers_single(const fms_index& index, char* sequence, char* rc_sequence, size_t sequence_length, int k, demasking_function_t f) {
+size_t query_kmers_single(fms_index& index, char* sequence, char* rc_sequence, size_t sequence_length, int k, demasking_function_t f) {
     size_t result = 0;
     for (size_t i = 0; i <= sequence_length - k; ++i) {
         char *kmer = sequence + i;
         char *rc_kmer = rc_sequence + (sequence_length - k - i);
+        bool should_swap = index.predictor.predict_swap();
+        if (should_swap) {
+            std::swap(kmer, rc_kmer);
+        }
+        int forward_predictor_result = 0, backward_predictor_result = 0;
         if constexpr (mode != query_mode::general) {
             int got;
             if constexpr (mode == query_mode::orr) {
@@ -173,16 +208,23 @@ size_t query_kmers_single(const fms_index& index, char* sequence, char* rc_seque
             } else {
                 got = single_query_or<true>(index, kmer, k);
             }
+            forward_predictor_result = got;
             if constexpr (mode == query_mode::orr) {
                 if (got != 1) {
                     got = single_query_or<false>(index,rc_kmer , k);
+                    backward_predictor_result = got;
                 }
             } else {
                 if (got == -1) {
                     got = single_query_or<true>(index, rc_kmer , k);
+                    backward_predictor_result = got;
                 }
             }
             result += got == 1;
+            if (should_swap) {
+                std::swap(forward_predictor_result, backward_predictor_result);
+            }
+            index.predictor.log_result(forward_predictor_result, backward_predictor_result);
         } else {
             auto [ones, total] = single_query_general(index, kmer, k);
             if (!AreStringsEqual(kmer, rc_kmer, k)) {
@@ -199,7 +241,7 @@ size_t query_kmers_single(const fms_index& index, char* sequence, char* rc_seque
 }
 
 template <query_mode mode>
-size_t query_kmers(const fms_index& index, char* sequence, size_t sequence_length, int k, bool has_klcp, demasking_function_t f = nullptr) {
+size_t query_kmers(fms_index& index, char* sequence, size_t sequence_length, int k, bool has_klcp, demasking_function_t f = nullptr) {
     char *rc_sequence = ReverseComplementString(sequence, sequence_length);
     size_t ret = 0;
     if (has_klcp && mode != query_mode::general) {
