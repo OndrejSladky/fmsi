@@ -329,7 +329,8 @@ int ms_query(int argc, char *argv[]) {
 
   std::cin.tie(&std::cout);
 
-  int64_t max_sequence_chunk_length = 400;
+  // Less than 1% overhead for the chunking (while gaining superior time from prediction).
+  int64_t max_sequence_chunk_length = 5000;
 
   while ((sequence_length = kseq_read(seq)) >= 0) {
     size_t current_kmers = std::max(int64_t(0), sequence_length - k + 1);
