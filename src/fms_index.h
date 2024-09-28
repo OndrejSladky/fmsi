@@ -17,8 +17,8 @@ struct strand_predictor {
     int* result_scores = new int[2] {0, 0};
     int previous = -1;
 
-    int clipped(int x) {
-        return std::max(-7, std::min(7, x));
+    inline int clipped(int x, int clipper = 7) {
+        return std::max(-clipper, std::min(clipper, x));
     }
 
     void log_result (int forward_query_result, int reverse_query_result) {
@@ -153,6 +153,12 @@ std::pair<size_t, size_t> single_query_general(fms_index& index, char* pattern, 
 template <bool maximized_ones = false>
 size_t query_kmers_streaming(fms_index& index, char* sequence, char* rc_sequence, size_t sequence_length, int k) {
     std::vector<signed char> result (sequence_length - k + 1);
+    // Search on the forward strand.
+    bool should_swap = index.predictor.predict_swap();
+    if (should_swap) {
+        std::swap(sequence, rc_sequence);
+    }
+    int forward_predictor_result = 0, backward_predictor_result = 0;
     size_t sa_start = -1, sa_end = -1;
     for (size_t i = 0; i <= sequence_length - k; ++i) {
         size_t i_back = sequence_length - k - i;
@@ -163,7 +169,9 @@ size_t query_kmers_streaming(fms_index& index, char* sequence, char* rc_sequence
             update_range(index, sa_start, sa_end, nucleotideToInt[(uint8_t)sequence[i_back]]);
         }
         result[i_back] = infer_presence<maximized_ones>(index, sa_start, sa_end);
+        forward_predictor_result += result[i_back];
     }
+    // Search on the reverse strand.
     sa_start = sa_end = -1;
     for (size_t i = 0; i <= sequence_length - k; ++i) {
         if (result[i] == 1 || (result[i] == 0 && maximized_ones)) {
@@ -180,7 +188,12 @@ size_t query_kmers_streaming(fms_index& index, char* sequence, char* rc_sequence
         }
         signed char res = infer_presence<maximized_ones>(index, sa_start, sa_end);
         result[i] = std::max(result[i], res);
+        backward_predictor_result += res;
     }
+    if (should_swap) {
+        std::swap(forward_predictor_result, backward_predictor_result);
+    }
+    index.predictor.log_result(forward_predictor_result, backward_predictor_result);
     return std::count(result.begin(), result.end(), 1);
 }
 

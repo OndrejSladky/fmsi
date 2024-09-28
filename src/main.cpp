@@ -329,6 +329,8 @@ int ms_query(int argc, char *argv[]) {
 
   std::cin.tie(&std::cout);
 
+  int64_t max_sequence_chunk_length = 400;
+
   while ((sequence_length = kseq_read(seq)) >= 0) {
     size_t current_kmers = std::max(int64_t(0), sequence_length - k + 1);
     size_t current_valid_kmers = 0;
@@ -337,14 +339,21 @@ int ms_query(int argc, char *argv[]) {
     while (sequence_length > 0) {
         int64_t current_length = next_invalid_character_or_end(sequence, sequence_length);
         if (current_length >= k) {
-            if (f_name == "or") {
-                current_found_kmers += query_kmers<query_mode::orr>(index, seq->seq.s,current_length, k, has_klcp);
-            } else if (f_name == "all") {
-                current_found_kmers += query_kmers<query_mode::all>(index, seq->seq.s, current_length, k, has_klcp);
-            } else {
-                current_found_kmers += query_kmers<query_mode::general>(index, seq->seq.s,current_length, k, has_klcp, f);
-            }
             current_valid_kmers += current_length - k + 1;
+        }
+        while (current_length >= k) {
+            int64_t chunk_length = std::min(current_length, max_sequence_chunk_length);
+            if (f_name == "or") {
+                current_found_kmers += query_kmers<query_mode::orr>(index, sequence, chunk_length, k, has_klcp);
+            } else if (f_name == "all") {
+                current_found_kmers += query_kmers<query_mode::all>(index, sequence, chunk_length, k, has_klcp);
+            } else {
+                current_found_kmers += query_kmers<query_mode::general>(index, sequence, chunk_length, k,
+                                                                        has_klcp, f);
+            }
+            sequence += chunk_length - k + 1;
+            current_length -= chunk_length - k + 1;
+            sequence_length -= chunk_length - k + 1;
         }
         // Skip also the next character.
         sequence_length -= current_length + 1;
