@@ -304,6 +304,31 @@ namespace {
         EXPECT_EQ(got_result, want_result);
     }
 
+    TEST(FMS_INDEX, OBTAIN_KMER) {
+        struct test_case {
+            std::string masked_superstring;
+            std::vector<int64_t> k_mers;
+            size_t i;
+            int64_t mask;
+            int sparsity;
+            int k;
+            int64_t want_result;
+        };
+        std::vector<test_case> tests  = {
+                {"CACACAT", {0b010001, 0b000100}, 0, 0b111111, 3, 3, 0b010001},
+                {"CACACAT", {0b010001, 0b000100}, 1, 0b111111, 3, 3, 0b000100},
+                {"CACACAT", {0b010001, 0b000100}, 2, 0b111111, 3, 3, 0b010001},
+                {"CACACAT", {0b010001, 0b000100}, 3, 0b111111, 3, 3, 0b000100},
+                {"CACACAT", {0b010001, 0b000100}, 4, 0b111111, 3, 3, 0b010011},
+        };
+
+        for (auto t: tests) {
+            auto got_result = obtain_kmer(t.k_mers, t.masked_superstring, t.i, t.sparsity, t.mask, t.k);
+
+            EXPECT_EQ(got_result, t.want_result);
+        }
+    }
+
     TEST(FMS_INDEX, CONSTRUCT_KLCP) {
         struct test_case {
             std::string masked_superstring;
@@ -321,22 +346,22 @@ namespace {
                     std::vector<bool>{0, 1, 1, 0, 1, 1, 0, 0},
                 },
                 {
-                    "AAAAT$", new qsint_t[6]{1,2,3,4, 5, 0}, 3,
-                    std::vector<bool>{0, 1, 1, 0, 0, 0, 0},
+                    "AAAAT", new qsint_t[6]{1,2,3,4, 5, 0}, 3,
+                    std::vector<bool>{0, 1, 1, 0, 0, 0},
                 },
                 {
-                    "AAAAT$", new qsint_t[6]{1,2,3,4, 5, 0}, 2,
-                            std::vector<bool>{0, 1, 1, 1, 0, 0, 0},
+                    "AAAAT", new qsint_t[6]{1,2,3,4, 5, 0}, 2,
+                            std::vector<bool>{0, 1, 1, 1, 0, 0},
                 },
         };
 
         for (auto t: tests) {
-            auto got_result = construct_klcp<uint64_t>(t.isa, t.masked_superstring, t.k - 1);
+            qsint_t* sa = new qsint_t[t.masked_superstring.length() + 1];
+            QSufSortGenerateSaFromInverse(t.isa, sa, (qsint_t)t.masked_superstring.length());
 
-            EXPECT_EQ(got_result.size(), t.want_result.size());
-            for (size_t i = 0; i < t.want_result.size(); ++i) {
-                EXPECT_EQ(got_result[i], t.want_result[i]);
-            }
+            auto got_result = construct_klcp<uint64_t>(sa, t.masked_superstring, t.k - 1);
+
+            EXPECT_EQ(std::vector<bool>(got_result.begin(), got_result.end()), t.want_result);
         }
 
     }

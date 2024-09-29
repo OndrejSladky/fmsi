@@ -102,7 +102,8 @@ void QSufSortGenerateSaFromInverse(const qsint_t* V, qsint_t* __restrict I, cons
 {
 	qsint_t i;
 	for (i=0; i<=numChar; i++)
-		I[V[i]] = i + 1;
+        // Ondrej Sladky: modified to be 0-based.
+		I[V[i]] = i; // Originally + 1.
 }
 
 /* Sorting routine called for each unsorted group. Sorts the array of integers

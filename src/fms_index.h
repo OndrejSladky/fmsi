@@ -268,12 +268,21 @@ size_t query_kmers(fms_index& index, char* sequence, size_t sequence_length, int
 
 
 template <typename T>
-sdsl::bit_vector construct_klcp(qsint_t *isa, std::string& ms, size_t k_minus_1) {
-    std::vector<qsint_t> sa(ms.size() + 1);
-    for (size_t i = 0; i < ms.size() + 1; ++i) {
-        sa[isa[i]] = i;
+T obtain_kmer(std::vector<T> kmers, std::string ms, size_t i, int kmer_sparsity, T mask, int k_minus_1) {
+    size_t i_base = i - (i % kmer_sparsity);
+    T kmer = kmers[i_base / kmer_sparsity];
+    for (size_t j = 0; j < i % kmer_sparsity; ++j) {
+        kmer = (kmer << 2);
+        kmer |= nucleotideToInt[(uint8_t)ms[i_base + k_minus_1 + j]];
+        kmer &= mask;
     }
-    std::vector<T> kmers (ms.size() - k_minus_1 + 1);
+    return kmer;
+}
+
+template <typename T>
+sdsl::bit_vector construct_klcp(qsint_t *sa, std::string& ms, size_t k_minus_1) {
+    int kmer_sparsity = 4;
+    std::vector<T> kmers ((ms.size() - k_minus_1 + 1) / kmer_sparsity + 1);
     T kmer = 0;
     T mask = (1 << (2 * k_minus_1 - 1));
     mask = mask | (mask - 1);
@@ -284,7 +293,9 @@ sdsl::bit_vector construct_klcp(qsint_t *isa, std::string& ms, size_t k_minus_1)
         kmer = (kmer << 2);
         kmer |= nucleotideToInt[(uint8_t)ms[i+k_minus_1-1]];
         kmer &= mask;
-        kmers[i] = kmer;
+        if (i % kmer_sparsity == 0) {
+            kmers[i / kmer_sparsity] = kmer;
+        }
     }
     sdsl::bit_vector klcp (ms.size() + 1, 0);
     for (size_t i = 0; i < ms.size(); ++i) {
@@ -293,11 +304,10 @@ sdsl::bit_vector construct_klcp(qsint_t *isa, std::string& ms, size_t k_minus_1)
         if ((size_t)sa_i > ms.size() - k_minus_1 || (size_t)sa_i1 > ms.size() - k_minus_1) {
             continue;
         }
-        klcp[i] = kmers[sa_i] == kmers[sa_i1];
+        klcp[i] = obtain_kmer(kmers, ms, sa_i, kmer_sparsity, mask, k_minus_1) == obtain_kmer(kmers, ms, sa_i1, kmer_sparsity, mask, k_minus_1);
     }
     return klcp;
 }
-
 
 
 
@@ -311,27 +321,31 @@ qsint_t* convert_superstring(std::string ms) {
 
 template <typename T>
 fms_index construct(std::string ms, int k, bool use_klcp) {
-    qsint_t *isa = convert_superstring(ms);
-    // TODO: find out the required size of workspace.
-    auto workspace = new qsint_t[ms.size() + 1];
-    QSufSortSuffixSort(isa, workspace, (qsint_t)ms.size(),3, 0, 0);
-    delete[] workspace;
+    qsint_t *qms = convert_superstring(ms);
+    auto sa = new qsint_t[ms.size() + 1];
+    QSufSortSuffixSort(qms, sa, (qsint_t)ms.size(),3, 0, 0);
+    QSufSortGenerateSaFromInverse(qms, sa, (qsint_t)ms.size());
+    delete[] qms;
 
     fms_index index;
 
     if (use_klcp) {
-        index.klcp = construct_klcp<T>(isa, ms, k-1);
+        index.klcp = construct_klcp<T>(sa, ms, k-1);
     }
 
     sdsl::bit_vector sa_transformed_mask(ms.size() + 1);
     std::vector<byte> bwt (ms.size() + 1);
-    for (size_t i = 0; i < ms.size(); ++i) {
-        bwt[isa[i+1]] = nucleotideToInt[(uint8_t)ms[i]];
-        sa_transformed_mask[isa[i]] = is_upper(ms[i]);
+    for (size_t i = 0; i <= ms.size(); ++i) {
+        if (sa[i] == 0) {
+            index.dollar_position = i;
+        } else {
+            bwt[i] = nucleotideToInt[(uint8_t)ms[sa[i] - 1]];
+        }
+        if (sa[i] != (qsint_t)ms.size()) {
+            sa_transformed_mask[i] = is_upper(ms[sa[i]]);
+        }
     }
-
-    index.dollar_position = isa[0];
-    delete[] isa;
+    delete[] sa;
     index.sa_transformed_mask = sdsl::rrr_vector<>(sa_transformed_mask);
     sa_transformed_mask.resize(0);
 
