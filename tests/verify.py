@@ -42,16 +42,21 @@ def run_fmsi_index(file):
 def create_fmsi_process(file, k):
     return subprocess.Popen([fmsi_path, 'query', '-p', file, '-q', '-', '-k', str(k), '-F'], stdout=subprocess.PIPE, stdin=subprocess.PIPE)
 
+def get_total_kmers(sequence, k):
+    return len(sequence) - k + 1
+
+def get_valid_kmers(sequence, k):
+    return sum(all(c in "ACGT" for c in sequence[i:i+k]) for i in range(len(sequence) - k + 1))
+
+def get_positive_kmers(sequence, superstring, mask, k):
+    return sum(f_or(lmbda(superstring, mask, sequence[i:i+k])) for i in range(len(sequence) - k + 1))
+
+
 def assert_correct_results(process, superstring, mask, kmers, k: int):
     results = []
     for i, kmer in enumerate(kmers):
-        if len(kmer) != k:
-            print(f"Skipping kmer {kmer} of length {len(kmer)}")
-            continue
         process.stdin.write(f">\n{kmer}\n".encode())
-        valid = not any(c not in "ACGT" for c in kmer)
-        present = f_or(lmbda(superstring, mask, kmer))
-        results.append([1, 1 if valid else 0, 1 if present else 0])
+        results.append([get_total_kmers(kmer, k), get_valid_kmers(kmer, k), get_positive_kmers(kmer, superstring, mask, k)])
     process.stdin.close()
     index = 0
     for line in process.stdout:
@@ -76,11 +81,20 @@ def generate_random_kmers(k, superstring, num_queries):
             kmers.append("".join(random.choice("ACGT") for _ in range(k)))
     return kmers
 
+def generate_random_sequences(k, superstring, num_queries, merge_number):
+    kmers = generate_random_kmers(k, superstring, num_queries * merge_number)
+    sequences = []
+    for i in range(0, num_queries, merge_number):
+        sequences.append("".join(kmers[i:i+merge_number]))
+    return sequences
+
+
 def main():
     print("Started testing")
     parser = argparse.ArgumentParser("check whether FMSI gives correct answers for a given dataset and possible a query file (otherwise positive and negative queries are generated randomly)")
     parser.add_argument("path", help="path to the fasta file on which ./kmers is verified")
     parser.add_argument("--k", type=int, help="the value of k; required")
+    parser.add_argument("--merge_number", type=int, help="the number of kmers to merge into a single query; if not specified, queries are generated from random kmers", default=1)
     parser.add_argument("--query_path", help="the path to the query file; if not specified, random queries are generated")
     parser.add_argument("--num_queries", type=int, help="the number of queries to generate if no query file is specified", default=1000)
     args = parser.parse_args()
@@ -91,7 +105,7 @@ def main():
         with open(args.query_path, 'r') as f:
             kmers = f.readlines()
     else:
-        kmers = generate_random_kmers(args.k, superstring, args.num_queries)
+        kmers = generate_random_sequences(args.k, superstring, args.num_queries, args.merge_number)
     process = create_fmsi_process(args.path, args.k)
     assert_correct_results(process, superstring, mask, kmers, args.k)
     print()
