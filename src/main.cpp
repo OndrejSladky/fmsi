@@ -20,6 +20,7 @@ static int usage() {
                "superstring."
             << std::endl;
   std::cerr << "  `query` - Queries a k-mer against an index." << std::endl;
+  std::cerr << "The following are only experimental subcommands and have a larger memory and time consumption:" << std::endl;
   std::cerr << "  `union` - Compute union of k-mers from several indices." << std::endl;
   std::cerr << "  `inter` - Compute intersection of k-mers from several indices." << std::endl;
   std::cerr << "  `diff`  - Compute set difference of k-mers from several indices." << std::endl;
@@ -97,9 +98,11 @@ static int usage_query() {
   std::cerr << "  `-q path_to_queries` - The path to the file with k-mers to "
                "query. Set '-' for standard input (default)."
             << std::endl;
-  std::cerr << "  `-k value_of_k` - The size of queried k-mers. If not set,"
-               "automatically inferred from the index. Only used for automatic k validation"
+  std::cerr << "  '-O' - Use speed optimization that leverages that the mask maximizes the number of ones. Use only when this is the case."
             << std::endl;
+  std::cerr << "  '-F' - Print the results per each entry in the query file." << std::endl;
+  std::cerr << "  `-h` - Prints this help and terminates." << std::endl;
+  std::cerr << "Advanced parameters:" << std::endl;
   std::cerr << "  `-f function`      - A function to determine whether a "
                "$k$-mer is represented based on the number of set and unset "
                "occurrences. The recognized functions are following:"
@@ -120,8 +123,9 @@ static int usage_query() {
                "$k$-mer represented when its number of set occurrences is "
                "between X and Y (inclusive)."
             << std::endl;
-  std::cerr << "  '-F' - Flush each k-mer result to allow interactive mode." << std::endl;
-  std::cerr << "  `-h` - Prints this help and terminates." << std::endl;
+    std::cerr << "  `-k value_of_k` - The size of queried k-mers. If not set,"
+                 "automatically inferred from the index. Only used for automatic k validation"
+              << std::endl;
   return 1;
 }
 
@@ -271,7 +275,7 @@ int ms_query(int argc, char *argv[]) {
   std::string f_name = "or";
   std::function<bool(size_t, size_t)> f = mask_function("or");
   bool flush = false;
-  while ((c = getopt(argc, argv, "p:f:hq:k:F")) >= 0) {
+  while ((c = getopt(argc, argv, "p:f:hq:k:FO")) >= 0) {
     switch (c) {
     case 'f':
       try {
@@ -294,6 +298,14 @@ int ms_query(int argc, char *argv[]) {
     case 'k':
       k = atoi(optarg);
       break;
+    case 'O':
+        if (f_name != "or") {
+            std::cerr << "WARNING: Parameter -O is ignored when parameter -f is specified." << std::endl;
+        } else {
+            f_name = "all";
+            f = mask_function("all");
+        }
+        break;
     case 'F':
       flush = true;
       break;

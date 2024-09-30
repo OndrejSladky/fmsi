@@ -1,63 +1,105 @@
-# FMSI ($f$-Masked Superstring Index)
+# FMSI
 
 [![FMSI test](https://github.com/OndrejSladky/fmsi/actions/workflows/ci.yml/badge.svg)](https://github.com/OndrejSladky/fmsi/actions/)
 
-FMSI is a memory-efficient tool for querying $k$-mer sets and performing set operations on them.
-Internally it implements the FMS-index - a BWT based index for $f$-masked superstrings.
+<!-- vim-markdown-toc GFM -->
 
-Note that currently the tool is still in development and especially the set operations are quite time-consuming.
+* [Introduction](#introduction)
+* [Prerequisities](#prerequisities)
+* [Getting started](#getting-started)
+* [How to use](#how-to-use)
+* [How it works](#how-it-works)
+* [How to test](#how-to-test)
+* [Issues](#issues)
+* [Changelog](#changelog)
+* [Licence](#licence)
+* [Contact](#contact)
 
-It is provided under the MIT license (see LICENSE file).
+<!-- vim-markdown-toc -->
 
-## How to cite
+## Introduction
 
-If you use FMSI in your research, please cite the following.
+FMSI is a highly memory-efficient tool (typically 3-5 memory bits / indexed k-mer) for performing membership queries on single $k$-mer sets.
+FMSI uses [masked superstrings](https://doi.org/10.1101/2024.03.06.583483) for storing the $k$-mer sets to ensure high compressibility for a wide range of different $k$-mer sets,
+and implements FMS-index, a simplification of the FM-index. It supports both streaming and single queries.
+
+It is based on the following papers:
 
 > Ondřej Sladký, Pavel Veselý, and Karel Břinda: Function-Assigned Masked Superstrings as a Versatile and Compact Data Type for *k*-Mer Sets.
 > *bioRxiv* 2024.03.06.583483, 2024. [https://doi.org/10.1101/2024.03.06.583483](https://doi.org/10.1101/2024.03.06.583483)
 
-```
-@article {sladky2024-f-masked-superstrings,
-	author = {Ond{\v r}ej Sladk{\'y} and Pavel Vesel{\'y} and Karel B{\v r}inda},
-	title = {Function-Assigned Masked Superstrings as a Versatile and Compact Data Type for 𝑘-Mer Sets},
-	elocation-id = {2024.03.06.583483},
-	year = {2024},
-	doi = {10.1101/2024.03.06.583483},
-	publisher = {Cold Spring Harbor Laboratory},
-	URL = {https://www.biorxiv.org/content/early/2024/03/11/2024.03.06.583483},
-	eprint = {https://www.biorxiv.org/content/early/2024/03/11/2024.03.06.583483.full.pdf},
-	journal = {bioRxiv}
-}
-
-```
-
 > Ondřej Sladký, Pavel Veselý, and Karel Břinda: Masked superstrings as a unified framework for textual *k*-mer set representations. *bioRxiv* 2023.02.01.526717, 2023.
 [https://doi.org/10.1101/2023.02.01.526717](https://doi.org/10.1101/2023.02.01.526717)
 
+To construct an index (the `fmsi index` subcommand), FMSI accepts as input (see the `-p` parameter) a masked superstring of the $k$-mer set.
+The masked superstring can be computed by [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel).
+It then stores the index in files with the same prefix and the `.fmsi` extension.
+To query the index (the `fmsi query` subcommand), FMSI accepts a FASTA file with $k$-mers to query (see the `-q` parameter).
+
+
+Additionally, FMSI experimentally supports set operations using the $f$-masked superstrings framework.
+However, this feature is currently only experimental and requires rather significant time and memory.
+
+## Prerequisities
+
+- GCC 4.8+ or equivalent
+- Zlib
+
+## Getting started
+
+To compute masked superstrings, download and compile KmerCamel🐫:
+
 ```
-@article{sladky2023-masked-superstrings,
-  title   = { Masked superstrings as a unified framework for textual $k$-mer set representations },
-  author  = { Sladk{\'y}, Ond{\v r}ej and Vesel{\'y}, Pavel and B{\v r}inda, Karel },
-  journal = { bioRxiv },
-  volume  = { 2023.02.01.526717 },
-  year    = { 2023 },
-  doi     = { 10.1101/2023.02.01.526717 }
-}
+git clone --recursive https://github.com/OndrejSladky/kmercamel
+cd kmercamel && make
 ```
 
-## How to install
-
-First clone the repo and its dependencies:
-
+Compute and optimize a masked superstring:
 ```
-git clone --recursive git@github.com:OndrejSladky/fmsi.git
+./kmercamel -p ./index.fa -k 31 -c -o ms-not-optimized.fa
+./kmercamel optimize -p ms-not-optimized.fa -k 31 -a ones -c -o ms.fa
 ```
 
-Compile the program by running `make`.
+Download and compile FMSI:
+
+```
+git clone --recursive https://github.com/OndrejSladky/fmsi
+cd prophasm2 && make -j
+```
+
+
+Create an index from a masked superstring:
+
+```
+./fmsi index -p ms.fa
+```
+
+Query the index (note that the `-O` optimization flag requires optimized masks for the number of ones):
+
+```
+./fmsi query -p ms.fa -q query.fa -O
+```
 
 ## How to use
 
-### Basic usage
+Construction of the index (get the full list of parameters by running `fmsi index -h`):
+```
+./fmsi index -p ms.fa        # Index the ms.fa file.
+./fmsi index -p ms.fa -s     # Do not construct the kLCP array to save memory on queries if streaming queries are not needed.
+./fmsi index -p ms.fa -k 31  # Explicitly provide k to override the automatically inferred value from the mask.
+```
+
+Querying the index (get the full list of parameters by running `fmsi query -h`):
+```
+./fmsi query -p ms.fa -q query.fa -O   # Query the index using optimizations for mask maximizing the number of ones (can lead to incorrect results if the mask is not optimized).
+./fmsi query -p ms.fa -q query.fa      # Do not turn on the optimizations.
+./fmsi query -p ms.fa                  # Read the queries from stdin.
+./fmsi query -p ms.fa -q query.fa -F   # Print results per each entry of the fasta file.
+```
+
+### Experimental implementation of set operations
+
+#### Basic usage
 
 If you wish to perform set operations or answer membership queries without the need to understand the
 details of the $f$-masked superstring framework, FMSI can manage the details for you.
@@ -82,7 +124,7 @@ The only downside to this approach is that each set operation uses compaction, w
 part of the process, which in some use cases might cause slowdowns which are not necessary. If this is your case,
 you probably want to stick to the advanced usage, managing the functions and building block methods yourself.
 
-### Advanced usage
+#### Advanced usage
 
 If you wish to manage the operations yourself, the workflow is quite similar to the basic usage, with the following changes:
 - Underlying $f$-MS concatenation can be done with `./fmsi merge`. Details on which $f$ should be used is described in Chapter 4 of the [paper](https://doi.org/10.1101/2024.03.06.583483).
@@ -110,10 +152,46 @@ The recognized commands are:
 
 Each command has its own set of arguments, which can be displayed by running `./fmsi [command] -h`.
 
-## How to run unittests
+## How it works?
+
+FMSI builds on the representation of *k*-mer sets via [masked superstrings](https://doi.org/10.1101/2024.03.06.583483),
+which ensures a generally compact representation of *k*-mers, requiring typically 1-1.4 characters per *k*-mer for genomes and pan-genomes.
+
+FMSI then builds a simplified FM-index, which omits the sampled suffix array, which is the key to the memory efficiency.
+It instead computes the SA-transformed mask, which makes it possible to determine the presence of a *k*-mer
+without the need to compute the original coordinates.
+
+Additionally, FMSI optionally constructs the kLCP array (a binary version of the truncated LCP array) 
+to allow *O(1)* time for a *k*-mer in streaming queries.
+
+The memory consumption of the index is split as follows:
+- $2.5$ bits per superstring character to store the BWT ($2.5 - 3.5$ bits per *k*-mer for typical genomes and pan-genomes).
+- Typically $0 - 0.8$ bits per *k*-mer to store the SA-transformed mask.
+- Optionally $1$ bit per superstring character to store the kLCP array.
+- $1$ byte per character of the largest entry in the queried fasta file (which is typically negligible).
+
+The construction of the index requires the full suffix array to be computed and requires up to 17 bytes per superstring character.
+
+
+## How to test
 
 To run the associated tests, simply run `make test`.
 
+## Issues
+
+Please use [GitHub issues](https://github.com/OndrejSladky/fmsi/issues).
+
+## Changelog
+
+See [Releases](https://github.com/OndrejSladky/fmsi/releases).
+
+
+## Licence
+
+[MIT](https://github.com/OndrejSladky/fmsi/blob/master/LICENSE.txt)
+
+
 ## Contact
 
-Ondřej Sladký - `sladky@iuuk.mff.cuni.cz`
+[Ondrej Sladky](https://iuuk.mff.cuni.cz/~sladky/) \<ondra.sladky@gmail.com\>\
+
