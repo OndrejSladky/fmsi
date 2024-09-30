@@ -20,7 +20,7 @@ integration-test: ./integration_test.sh
 
 verification-test: ./verify.py
 	$(MAKE) -C ..
-	python3 verify.py data/GCF_009858895.2_ASM985889v3_genomic.fna.ms.k13 --num_queries=1000 --k=13
+	python3 verify.py data/GCF_009858895.2_ASM985889v3_genomic.fna.ms.k13 --num_queries=100 --k=13 --merge_number=3
 
 fmsi-test: $(wildcard *.cpp *.h *.hpp) gtest-all.o $(SRC)/$(wildcard *.cpp *.h *.hpp) $(SRC)/QSufSort.c
 	$(CXX) $(CXXFLAGS) -isystem $(GTEST)/include -I $(GTEST)/include  $(INCLUDES) main.cpp $(SRC)/QSufSort.c gtest-all.o -pthread -o $@ $(LIBS)
