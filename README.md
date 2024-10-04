@@ -6,10 +6,15 @@
 
 * [Introduction](#introduction)
 * [Prerequisities](#prerequisities)
-* [Getting started](#getting-started)
-* [How to use](#how-to-use)
-* [How it works](#how-it-works)
-* [How to test](#how-to-test)
+* [Installation](#installation)
+* [Usage](#usage)
+   * [k-mer queries (stable)](#k-mer-queries-stable)
+   * [k-mer set operations (experimental)](#k-mer-set-operations-experimental)
+      * [Basic: k-mer set operations managed by FMSI](#basic-k-mer-set-operations-managed-by-fmsi)
+      * [Advanced: externally managed k-mer set operations](#advanced-externally-managed-k-mer-set-operations)
+* [Commands overview](#commands-overview)
+* [How it works?](#how-it-works)
+* [Testing](#testing)
 * [Issues](#issues)
 * [Changelog](#changelog)
 * [Licence](#licence)
@@ -46,60 +51,46 @@ However, this feature is currently only experimental and requires rather signifi
 
 - GCC 4.8+ or equivalent
 - Zlib
+- [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel) (for computing masked superstrings)
 
-## Getting started
 
-To compute masked superstrings, download and compile KmerCamel🐫:
-
-```
-git clone --recursive https://github.com/OndrejSladky/kmercamel
-cd kmercamel && make
-```
-
-Compute a masked superstring:
-```
-./kmercamel -p ./index.fa -k 31 -c -o ms.fa
-```
-
-Download and compile FMSI:
+## Installation
 
 ```
 git clone --recursive https://github.com/OndrejSladky/fmsi
-cd prophasm2 && make -j
+cd fmsi && make -j
+export PATH="$PATH:$(pwd)"
 ```
 
+## Usage
 
-Create an index from a masked superstring:
+### k-mer queries (stable)
 
-```
-./fmsi index -p ms.fa
-```
+1. Compute a masked superstring for all k-mers from a given FASTA file.
+   ```
+   kmercamel -p input_file.fa -k 31 -c -o ms.fa
+   ```
 
-Query the index:
+2. Create an FMS index from the masked superstring:
+   ```
+   ./fmsi index -p ms.fa
+   ```
 
-```
-./fmsi query -p ms.fa -q query.txt -k 31
-```
+3. Query the index from a given query file (EOL-separated list of k-mers):
+   ```
+   ./fmsi query -p ms.fa -q query.txt -k 31
+   ```
 
-## How to use
+### k-mer set operations (experimental)
 
-Construction of the index (get the full list of parameters by running `fmsi index -h`):
-```
-./fmsi index -p ms.fa        # Index the ms.fa file.
-```
+#### Basic: k-mer set operations managed by FMSI
 
-Querying the index (get the full list of parameters by running `fmsi query -h`):
-```
-./fmsi query -p ms.fa -q query.txt -k 31     # Query the index.
-```
+If you wish to perform set operations or answer membership queries without the
+need to understand the details of the $f$-masked superstring framework, FMSI
+can manage the details for you.
 
-### Experimental implementation of set operations
-
-#### Basic usage
-
-If you wish to perform set operations or answer membership queries without the need to understand the
-details of the $f$-masked superstring framework, FMSI can manage the details for you.
 This can be done in a few simple steps:
+
 1. **Compute a masked superstring.**
    - This can be done by [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel); simply run `kmercamel -c -k 31 -p fasta.fa -o ms.fa` (with appropriate values for `-k` and `-p`).
    - If you obtained the masked superstring in a different way, make sure it minimizes the number of ones; if you're unsure, you can use `kmercamel optimize -c -a zeros -k 31 -p ms_more_ones.fa -o ms.fa`. No need to optimize superstrings directly computed by KmerCamel🐫.
@@ -120,14 +111,14 @@ The only downside to this approach is that each set operation uses compaction, w
 part of the process, which in some use cases might cause slowdowns which are not necessary. If this is your case,
 you probably want to stick to the advanced usage, managing the functions and building block methods yourself.
 
-#### Advanced usage
+#### Advanced: externally managed k-mer set operations
 
 If you wish to manage the operations yourself, the workflow is quite similar to the basic usage, with the following changes:
 - Underlying $f$-MS concatenation can be done with `./fmsi merge`. Details on which $f$ should be used is described in Chapter 4 of the [paper](https://doi.org/10.1101/2024.03.06.583483).
 - Compaction and change back to the or-masked superstring can be done with `./fmsi compact`.
 - If you query the index with different function than or, use the `-f` argument. The same applies to compaction.
 
-### Commands overview
+## Commands overview
 
 To run the tool, run `./fmsi [command]`
 
@@ -165,7 +156,7 @@ The memory consumption of the index is split as follows:
 The construction of the index requires the full suffix array to be computed and requires up to 17 bytes per superstring character.
 
 
-## How to test
+## Testing
 
 To run the associated tests, simply run `make test`.
 
