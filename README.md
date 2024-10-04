@@ -5,7 +5,6 @@
 <!-- vim-markdown-toc GFM -->
 
 * [Introduction](#introduction)
-* [Prerequisities](#prerequisities)
 * [Installation](#installation)
 * [Usage](#usage)
    * [k-mer queries (stable)](#k-mer-queries-stable)
@@ -47,15 +46,16 @@ In a very near future, we will however update this to accept a FASTA file and al
 Additionally, FMSI experimentally supports set operations using the $f$-masked superstrings framework.
 However, this feature is currently only experimental and requires rather significant time and memory.
 
-## Prerequisities
-
-- GCC 4.8+ or equivalent
-- Zlib
-- [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel) (for computing masked superstrings)
 
 
 ## Installation
 
+**Prerequisities:**
+
+- GCC 4.8+ or equivalent
+- Zlib
+
+**Installation:**
 ```
 git clone --recursive https://github.com/OndrejSladky/fmsi
 cd fmsi && make -j
@@ -66,7 +66,7 @@ export PATH="$PATH:$(pwd)"
 
 ### k-mer queries (stable)
 
-1. Compute a masked superstring for all k-mers from a given FASTA file.
+1. Compute a masked superstring for all k-mers from a given FASTA file by [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel).
    ```
    kmercamel -p input_file.fa -k 31 -c -o ms.fa
    ```
