@@ -268,7 +268,7 @@ size_t query_kmers(fms_index& index, char* sequence, size_t sequence_length, int
 
 
 template <typename T>
-T obtain_kmer(std::vector<T> kmers, std::string ms, size_t i, int kmer_sparsity, T mask, int k_minus_1) {
+inline T obtain_kmer(std::vector<T> &kmers, std::string &ms, size_t i, int kmer_sparsity, T mask, int k_minus_1) {
     size_t i_base = i - (i % kmer_sparsity);
     T kmer = kmers[i_base / kmer_sparsity];
     for (size_t j = 0; j < i % kmer_sparsity; ++j) {
@@ -320,7 +320,7 @@ qsint_t* convert_superstring(std::string ms) {
 }
 
 template <typename T>
-fms_index construct(std::string ms, int k, bool use_klcp) {
+fms_index construct(std::string &ms, int k, bool use_klcp) {
     qsint_t *qms = convert_superstring(ms);
     auto sa = new qsint_t[ms.size() + 1];
     QSufSortSuffixSort(qms, sa, (qsint_t)ms.size(),3, 0, 0);
@@ -397,10 +397,11 @@ std::string export_ms(const fms_index& index) {
 }
 
 fms_index merge(const fms_index& a, const fms_index& b) {
+    std::string merged = export_ms(a) + export_ms(b);
     if (a.k <= 32)  {
-        return construct<uint64_t>(export_ms(a) + export_ms(b), a.k, a.klcp.size() > 0);
+        return construct<uint64_t>(merged, a.k, a.klcp.size() > 0);
     } else {
-        return construct<__uint128_t>(export_ms(a) + export_ms(b), a.k, a.klcp.size() > 0);
+        return construct<__uint128_t>(merged, a.k, a.klcp.size() > 0);
     }
 }
 
