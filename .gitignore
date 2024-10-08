@@ -4,7 +4,6 @@ tests/fmsi-test
 src/version.h
 tests/bin/
 
-CMakeLists.txt
 cmake-build-debug/
 
 
