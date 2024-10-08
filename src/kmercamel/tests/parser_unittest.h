@@ -1,8 +1,5 @@
 #pragma once
 #include "../src/parser.h"
-#include "../src/ac/parser_ac.h"
-
-#include "kmer_types.h"
 
 #include <algorithm>
 #include <vector>
@@ -54,9 +51,9 @@ namespace {
         };
 
         for (auto &t: tests) {
-            auto kMers  = wrapper.kh_init_set();
+            auto kMers  = kh_init_S64();
 
-            ReadKMers(kMers, wrapper, kmer_t (0), path, t.k, t.complements, t.case_sensitive);
+            ReadKMers(kMers, path, t.k, t.complements, t.case_sensitive);
 
             EXPECT_EQ(t.wantResultSize, kh_size(kMers));
         }
@@ -133,6 +130,26 @@ namespace {
             for (size_t i = 0; i < t.wantResult.size(); ++i) {
                 EXPECT_EQ(t.wantResult[i].value, gotResult[i].value);
             }
+        }
+    }
+
+    TEST(Parser, PrintRemainingKMer) {
+        struct TestCase {
+            kmer_t currentKMer;
+            int k;
+            int beforeKMerEnd;
+            std::string wantResult;
+        };
+        std::vector<TestCase> tests = {
+                {KMerToNumber({"TAC"}), 3, 1, "ac"},
+                {KMerToNumber({"TAC"}), 3, 2, "c"},
+                {KMerToNumber({"TAC"}), 3, 3, ""},
+        };
+
+        for (auto t: tests) {
+            std::stringstream of;
+            PrintRemainingKMer(t.currentKMer, t.beforeKMerEnd, t.k, of);
+            EXPECT_EQ(t.wantResult, of.str());
         }
     }
 }

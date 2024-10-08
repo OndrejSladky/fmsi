@@ -1,5 +1,5 @@
 #pragma once
-#include "../src/ac/ac_automaton.h"
+#include "../src/ac_automaton.h"
 
 #include "gtest/gtest.h"
 

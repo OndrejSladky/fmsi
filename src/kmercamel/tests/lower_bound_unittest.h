@@ -1,7 +1,5 @@
 #pragma once
 
-#include "kmer_types.h"
-
 #include "../src/lower_bound.h"
 
 #include "gtest/gtest.h"
@@ -30,7 +28,7 @@ namespace {
         };
 
         for (auto &t : tests) {
-            auto gotResult = LowerBoundLength(wrapper, t.kMers, t.k, t.complements);
+            auto gotResult = LowerBoundLength(t.kMers, t.k, t.complements);
 
             ASSERT_EQ(t.wantResult, gotResult);
         }

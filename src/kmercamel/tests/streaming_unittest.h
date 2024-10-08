@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../src/ac/streaming.h"
+#include "../src/streaming.h"
 #include "gtest/gtest.h"
 namespace {
 

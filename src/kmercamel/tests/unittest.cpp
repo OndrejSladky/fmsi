@@ -1,5 +1,5 @@
-#include "kmers_unittest.h"
 #include "parser_unittest.h"
+#include "kmers_unittest.h"
 #include "global_unittest.h"
 #include "global_ac_unittest.h"
 #include "local_unittest.h"

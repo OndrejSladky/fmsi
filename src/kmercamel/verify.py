@@ -5,12 +5,12 @@ import os
 import argparse
 
 
-def verify_instance(fasta_path: str, k: int, algorithm: str, complements: bool, masked_superstring: str) -> bool:
+def verify_instance(fasta_path: str, k: int, algorithm: str, complements: bool, large: bool, masked_superstring: str) -> bool:
     """
     Check if running superstring algorithm on given fasta file produces the same set of k-mers as the original one.
     """
     with open("./bin/kmercamel.txt", "w") as k_mers:
-        args = ["./kmercamel"] + (["optimize"] if masked_superstring else []) + ["-p", (masked_superstring if masked_superstring != "" else fasta_path), "-k", f"{k}", "-a", algorithm]
+        args = ["./kmercamel-large" if large else "./kmercamel"] + (["optimize"] if masked_superstring else []) + ["-p", (masked_superstring if masked_superstring != "" else fasta_path), "-k", f"{k}", "-a", algorithm]
         if complements:
             args.append("-c")
         subprocess.run(args, stdout=k_mers)
@@ -62,7 +62,7 @@ def main():
     if not os.path.exists("bin"):
         os.makedirs("bin")
 
-    parser = argparse.ArgumentParser("check whether ./kmercamel (optimize) outputs a superstring which contains the same set of k-mers"
+    parser = argparse.ArgumentParser("check whether ./kmercamel(-large) (optimize) outputs a superstring which contains the same set of k-mers"
                                      "as the original sequence")
     parser.add_argument("path", help="path to the fasta file on which ./kmers is verified")
     parser.add_argument("--quick", help="if set do not check for full range of k", action="store_true")
@@ -76,15 +76,19 @@ def main():
         for a in ["global", "local", "globalAC", "localAC", "streaming"]:
             print(f"Testing {a}:")
             for complements in [True, False]:
-                for k in ( ([5, 8, 12] if a not in ["local", "global"] else [5, 8, 12, 17, 31, 32, 51, 63, 127]) if args.quick else range(2, 128)):
-                    success &= verify_instance(args.path, k, a, complements, "")
-                print("")
+                for large in [True, False]:
+                    for k in ( ([5, 8, 12] if a not in ["local", "global"] else [5, 8, 12, 17, 31, 43, 51, 63]) if args.quick else range(2, 64)):
+                        if not large and k >= 32: continue
+                        success &= verify_instance(args.path, k, a, complements, large, "")
+                    print("")
     else:
         k = int(args.k)
         # Do the tests on mask optimization.
         for a in ["runs", "ones", "zeros", "runsapprox"]:
             print(f"Testing {a}:")
-            success &= verify_instance(args.path, k, a, True, args.superstring_path)
+            for large in [True, False]:
+                if not large and k >= 32: continue
+                success &= verify_instance(args.path, k, a, True, large, args.superstring_path)
             print("")
 
     # Print status.

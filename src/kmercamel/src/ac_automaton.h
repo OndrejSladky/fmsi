@@ -3,7 +3,7 @@
 #include <list>
 #include <vector>
 
-#include "kmers_ac.h"
+#include "models.h"
 
 constexpr int INVALID_STATE = -1;
 struct ACState {

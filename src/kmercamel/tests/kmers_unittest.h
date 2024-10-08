@@ -1,8 +1,5 @@
 #pragma once
-#include "../src/ac/kmers_ac.h"
 #include "../src/kmers.h"
-
-#include "kmer_types.h"
 
 #include "gtest/gtest.h"
 

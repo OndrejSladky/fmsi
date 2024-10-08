@@ -5,7 +5,7 @@
 #include <cassert>
 #include <algorithm>
 
-#include "kmers_ac.h"
+#include "kmers.h"
 
 void Push(std::ostream &of, const std::string &current, int k, int32_t used) {
     if (current.size() == static_cast<size_t>(k) && used != 0) {
@@ -40,7 +40,7 @@ void Streaming(std::string &path, std::ostream &of, int k, bool complements) {
                         if (kMer.size() == size_t(k + 1)) kMer=kMer.substr(1);
                         assert(kMer.size() <= size_t(k));;
                         if (kMer.length() == size_t (k) ) {
-                            uint64_t encoded = KMerToNumber(KMer{kMer});
+                            int64_t encoded = KMerToNumber(KMer{kMer});
                             auto rc = ReverseComplement(encoded, k);
                             auto rc2 = NumberToKMer(rc, k);
                             bool contained = (kMers.count(encoded) > 0) || ((complements) && kMers.count(ReverseComplement(encoded, k)) > 0);
