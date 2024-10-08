@@ -1,9 +1,6 @@
 [submodule "tests/googletest"]
 	path = tests/googletest
 	url = https://github.com/google/googletest
-[submodule "src/sdsl-lite"]
-	path = src/sdsl-lite
-	url = https://github.com/simongog/sdsl-lite/
 [submodule "src/kmercamel"]
 	path = src/kmercamel
 	url = https://github.com/OndrejSladky/kmercamel
