@@ -1,0 +1,55 @@
+name: C++ CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build_with_unittests_ubuntu:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: glpk
+      run: sudo apt install glpk-utils libglpk-dev glpk-doc
+    - name: make
+      run: make
+    - name: submodule
+      run: git submodule init; git submodule update
+    - name: cpptests
+      run: make cpptest
+    - name: converttests
+      run: make converttest
+
+  build_with_unittests_macos:
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: glpk
+      run: brew install glpk
+    - name: make
+      run: make
+    - name: submodule
+      run: git submodule init; git submodule update
+    - name: cpptests
+      run: make cpptest
+    - name: converttests
+      run: make converttest
+      
+  verify_ubuntu:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    - name: glpk
+      run: sudo apt install glpk-utils libglpk-dev glpk-doc
+    - name: make
+      run: make
+    - name: jellyfish
+      run: sudo apt install jellyfish
+    - name: verify
+      run: make quick-verify
+

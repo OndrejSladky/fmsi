@@ -1,6 +1,3 @@
 [submodule "tests/googletest"]
 	path = tests/googletest
 	url = https://github.com/google/googletest
-[submodule "src/kmercamel"]
-	path = src/kmercamel
-	url = https://github.com/OndrejSladky/kmercamel
