@@ -310,6 +310,7 @@ int ms_query(int argc, char *argv[]) {
         break;
     case 's':
       has_klcp = false;
+      break;
     case 'F':
       flush = true;
       break;
