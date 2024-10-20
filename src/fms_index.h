@@ -12,6 +12,7 @@
 
 typedef unsigned char byte;
 
+/// A saturating counter that predicts whether the next queried k-mer is from the same strand as MS or from the reverse one.
 struct strand_predictor {
     int score = 0;
     int* result_scores = new int[2] {0, 0};
@@ -34,10 +35,12 @@ struct strand_predictor {
         previous = forward_query_result > reverse_query_result;
     }
 
+    /// Make prediction conditioned on the result of the previous query.
     bool predict_swap() {
         if (previous != -1 && result_scores[previous] != 0) {
             return result_scores[previous] < 0;
         } else {
+            // If no information (score==0), assume forward strand.
             return score < 0;
         }
     }
@@ -87,6 +90,7 @@ inline byte access(const fms_index& index, size_t i) {
     }
 }
 
+/// Go from range (i,j) for pattern P to range for c+P
 inline void update_range(const fms_index& index, size_t& i, size_t& j, byte c) {
     if (j == i) return;
     auto count = index.counts[c];
@@ -94,10 +98,12 @@ inline void update_range(const fms_index& index, size_t& i, size_t& j, byte c) {
     j = count + rank(index, j, c);
 }
 
+/// Go from range (i,j) for pattern Px to range for P.
 inline void extend_range_with_klcp(const fms_index& index, size_t& i, size_t& j) {
     while(index.klcp[j-1]) j++;
     while(index.klcp[i-1]) i--;
 
+    // Unused alternative for klcp-based extending. Unused for being too memory heavy and slower.
     //auto rank = index.klcp_rank(i);
     // Select is indexed from 1.
     //i = index.klcp_select(rank) + 1;
@@ -153,11 +159,12 @@ std::pair<size_t, size_t> single_query_general(fms_index& index, char* pattern, 
 template <bool maximized_ones = false>
 size_t query_kmers_streaming(fms_index& index, char* sequence, char* rc_sequence, size_t sequence_length, int k) {
     std::vector<signed char> result (sequence_length - k + 1, -1);
-    // Search on the forward strand.
+    // Use saturating counter to ensure that RC strings are visited as forward strings.
     bool should_swap = index.predictor.predict_swap();
     if (should_swap) {
         std::swap(sequence, rc_sequence);
     }
+    // Search on the forward strand.
     int forward_predictor_result = 0, backward_predictor_result = 0;
     size_t sa_start = -1, sa_end = -1;
     for (size_t i = 0; i <= sequence_length - k; ++i) {
@@ -190,6 +197,7 @@ size_t query_kmers_streaming(fms_index& index, char* sequence, char* rc_sequence
         result[i] = std::max(result[i], res);
         backward_predictor_result += res;
     }
+    // Log the results to the saturating counter for better future performance.
     if (should_swap) {
         std::swap(forward_predictor_result, backward_predictor_result);
     }
@@ -240,6 +248,7 @@ size_t query_kmers_single(fms_index& index, char* sequence, char* rc_sequence, s
             index.predictor.log_result(forward_predictor_result, backward_predictor_result);
         } else {
             auto [ones, total] = single_query_general(index, kmer, k);
+            // Do not count self complementary k-mers twice.
             if (!AreStringsEqual(kmer, rc_kmer, k)) {
                 auto [ones_rev, total_rev] = single_query_general(index, rc_kmer, k);
                 ones += ones_rev;

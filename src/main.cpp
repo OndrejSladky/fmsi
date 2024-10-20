@@ -244,7 +244,7 @@ int ms_index(int argc, char *argv[]) {
               << std::endl;
     return usage_index();
   }
-  std::cerr << "Read masked superstring" << std::endl;
+  std::cerr << "Read masked superstring of length " << ms.size() << std::endl;
   int inferred_k = infer_k(ms);
   if (k == 0) {
     k = inferred_k;
@@ -254,7 +254,7 @@ int ms_index(int argc, char *argv[]) {
       std::cerr << "WARNING: The provided k (" << k << ") does not match the k inferred from the mask convention (" << inferred_k << "). The provided k is used but we recommend double checking that it is correct." << std::endl;
   }
   if (k > 64 && !no_streaming) {
-      std::cerr << "WARNING: Construction of kLCP array for streaming support is only available for k <= 64. The index will be constructed without streaming support, which might result in slower positive streaming queries." << std::endl;
+      std::cerr << "WARNING: Construction of kLCP array for streaming support is only available for k <= 64. The index will be constructed without streaming support, which results in slower positive streaming queries." << std::endl;
       no_streaming = true;
   }
   fms_index index;
