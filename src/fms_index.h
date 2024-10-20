@@ -45,11 +45,11 @@ struct strand_predictor {
 
 struct fms_index {
     sdsl::bit_vector ac_gt;
-    sdsl::rank_support_v<1> ac_gt_rank;
+    sdsl::rank_support_v5<1> ac_gt_rank;
     sdsl::bit_vector ac;
-    sdsl::rank_support_v<1> ac_rank;
+    sdsl::rank_support_v5<1> ac_rank;
     sdsl::bit_vector gt;
-    sdsl::rank_support_v<1> gt_rank;
+    sdsl::rank_support_v5<1> gt_rank;
     sdsl::rrr_vector<> sa_transformed_mask;
     std::vector<size_t> counts;
     size_t dollar_position;
@@ -152,7 +152,7 @@ std::pair<size_t, size_t> single_query_general(fms_index& index, char* pattern, 
 
 template <bool maximized_ones = false>
 size_t query_kmers_streaming(fms_index& index, char* sequence, char* rc_sequence, size_t sequence_length, int k) {
-    std::vector<signed char> result (sequence_length - k + 1);
+    std::vector<signed char> result (sequence_length - k + 1, -1);
     // Search on the forward strand.
     bool should_swap = index.predictor.predict_swap();
     if (should_swap) {
@@ -374,9 +374,9 @@ fms_index construct(std::string &ms, int k, bool use_klcp) {
         }
     }
     index.counts = {1, a_count, ac_count, ac_count + g_count};
-    index.ac_gt_rank = sdsl::rank_support_v<1>(&index.ac_gt);
-    index.ac_rank = sdsl::rank_support_v<1>(&index.ac);
-    index.gt_rank = sdsl::rank_support_v<1>(&index.gt);
+    index.ac_gt_rank = sdsl::rank_support_v5<1>(&index.ac_gt);
+    index.ac_rank = sdsl::rank_support_v5<1>(&index.ac);
+    index.gt_rank = sdsl::rank_support_v5<1>(&index.gt);
 
     index.k = k;
 
@@ -425,11 +425,11 @@ fms_index load_index(const std::string &fn) {
     fms_index index;
     auto basename = fn + ".fmsi";
     sdsl::load_from_file(index.ac_gt, basename + ".ac_gt");
-    index.ac_gt_rank = sdsl::rank_support_v<1>(&index.ac_gt);
+    index.ac_gt_rank = sdsl::rank_support_v5<1>(&index.ac_gt);
     sdsl::load_from_file(index.ac, basename + ".ac");
-    index.ac_rank = sdsl::rank_support_v<1>(&index.ac);
+    index.ac_rank = sdsl::rank_support_v5<1>(&index.ac);
     sdsl::load_from_file(index.gt, basename + ".gt");
-    index.gt_rank = sdsl::rank_support_v<1>(&index.gt);
+    index.gt_rank = sdsl::rank_support_v5<1>(&index.gt);
     sdsl::load_from_file(index.sa_transformed_mask, basename + ".mask");
     if (std::filesystem::exists(basename + ".klcp")) {
         sdsl::load_from_file(index.klcp, basename + ".klcp");

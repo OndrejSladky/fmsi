@@ -434,9 +434,9 @@ int ms_merge(int argc, char *argv[]) {
 
   for (size_t i = 1; i < fns.size(); ++i) {
       // TODO: investigate why this is needed (the ranks must have gotten set to nullptr somewhere).
-      res.ac_gt_rank = sdsl::rank_support_v<1>(&res.ac_gt);
-      res.ac_rank = sdsl::rank_support_v<1>(&res.ac);
-      res.gt_rank = sdsl::rank_support_v<1>(&res.gt);
+      res.ac_gt_rank = sdsl::rank_support_v5<1>(&res.ac_gt);
+      res.ac_rank = sdsl::rank_support_v5<1>(&res.ac);
+      res.gt_rank = sdsl::rank_support_v5<1>(&res.gt);
       auto current = load_index(fns[i]);
       if (res.k != current.k) {
           std::cerr << "Mismatch. The k of the index " << fns[i] << " (" << current.k << ") does not match the k of the index " << fns[0] << "(" << res.k << ")." << std::endl;
@@ -603,15 +603,15 @@ int ms_op(int argc, char *argv[], std::string op) {
 
     for (size_t i = 1; i < fns.size(); ++i) {
         // TODO: investigate why this is needed (the ranks must have gotten set to nullptr somewhere).
-        res.ac_gt_rank = sdsl::rank_support_v<1>(&res.ac_gt);
-        res.ac_rank = sdsl::rank_support_v<1>(&res.ac);
-        res.gt_rank = sdsl::rank_support_v<1>(&res.gt);
+        res.ac_gt_rank = sdsl::rank_support_v5<1>(&res.ac_gt);
+        res.ac_rank = sdsl::rank_support_v5<1>(&res.ac);
+        res.gt_rank = sdsl::rank_support_v5<1>(&res.gt);
         res = merge(res, load_index(fns[i]));
         if (op == "diff") {
             // TODO: investigate why this is needed (the ranks must have gotten set to nullptr somewhere).
-            res.ac_gt_rank = sdsl::rank_support_v<1>(&res.ac_gt);
-            res.ac_rank = sdsl::rank_support_v<1>(&res.ac);
-            res.gt_rank = sdsl::rank_support_v<1>(&res.gt);
+            res.ac_gt_rank = sdsl::rank_support_v5<1>(&res.ac_gt);
+            res.ac_rank = sdsl::rank_support_v5<1>(&res.ac);
+            res.gt_rank = sdsl::rank_support_v5<1>(&res.gt);
             res = merge(res, load_index(fns[i]));
         }
         std::cerr << "Loaded and merged index " << fns[i] << std::endl;
@@ -619,9 +619,9 @@ int ms_op(int argc, char *argv[], std::string op) {
 
 
     // TODO: investigate why this is needed (the ranks must have gotten set to nullptr somewhere).
-    res.ac_gt_rank = sdsl::rank_support_v<1>(&res.ac_gt);
-    res.ac_rank = sdsl::rank_support_v<1>(&res.ac);
-    res.gt_rank = sdsl::rank_support_v<1>(&res.gt);
+    res.ac_gt_rank = sdsl::rank_support_v5<1>(&res.ac_gt);
+    res.ac_rank = sdsl::rank_support_v5<1>(&res.ac);
+    res.gt_rank = sdsl::rank_support_v5<1>(&res.gt);
 
     auto ms = export_ms(res);
 
