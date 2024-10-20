@@ -293,7 +293,7 @@ sdsl::bit_vector construct_klcp(qsint_t *sa, std::string& ms, size_t k_minus_1) 
     int kmer_sparsity = 4;
     std::vector<T> kmers ((ms.size() - k_minus_1 + 1) / kmer_sparsity + 1);
     T kmer = 0;
-    T mask = (1 << (2 * k_minus_1 - 1));
+    T mask = (T(1) << (2 * k_minus_1 - 1));
     mask = mask | (mask - 1);
     for (size_t i = 0; i < k_minus_1 - 1; ++i) {
         kmer = (kmer << 2) | nucleotideToInt[(uint8_t)ms[i]];
