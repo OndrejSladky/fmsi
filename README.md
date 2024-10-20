@@ -90,7 +90,7 @@ export PATH="$PATH:$(pwd)"
 
 #### Specific-case usage
 
-If you do not need support for streaming queries, use the `-s` flag for construction for additional memory savings when querying.
+If you do not need support for streaming queries, use the `-s` flag when querying for additional memory savings.
 
 If your mask superstring does not maximizes the number of ones in the mask, omit the `-O` optimization flag for query as otherwise you might get incorrect results.
 We, however, recommend to optimize the mask using `kmercamel optimize`.
