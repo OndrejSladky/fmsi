@@ -39,24 +39,36 @@ def read_masked_superstring(file):
 def run_fmsi_index(file):
     subprocess.run([fmsi_path, 'index', '-p', file])
 
-def create_fmsi_process(file, k):
-    return subprocess.Popen([fmsi_path, 'query', '-p', file, '-q', '-', '-k', str(k), '-F'], stdout=subprocess.PIPE, stdin=subprocess.PIPE)
+def create_fmsi_process(file, k, optimize):
+    return subprocess.Popen([fmsi_path, 'query', '-p', file, '-q', '-', '-k', str(k), '-F'] + (['-O'] if optimize else []), stdout=subprocess.PIPE, stdin=subprocess.PIPE)
+
+def get_total_kmers(sequence, k):
+    return len(sequence) - k + 1
+
+def get_valid_kmers(sequence, k):
+    return sum(all(c in "ACGT" for c in sequence[i:i+k]) for i in range(len(sequence) - k + 1))
+
+def get_positive_kmers(sequence, superstring, mask, k):
+    return sum(f_or(lmbda(superstring, mask, sequence[i:i+k])) for i in range(len(sequence) - k + 1))
+
 
 def assert_correct_results(process, superstring, mask, kmers, k: int):
+    results = []
     for i, kmer in enumerate(kmers):
-        if len(kmer) != k:
-            print(f"Skipping kmer {kmer} of length {len(kmer)}")
-            continue
-        process.stdin.write(f"{kmer}\n".encode())
-        process.stdin.flush()
-        output = process.stdout.readline().decode().strip()
-        assert output in ["FOUND", "NOT FOUND"], f"Unexpected output: {output} for kmer {kmer}"
-        present_fmsi = output == "FOUND"
-        present = f_or(lmbda(superstring, mask, kmer))
-        assert present_fmsi == present, f"Expected {present}, got {present_fmsi} for kmer {kmer}"
+        process.stdin.write(f">\n{kmer}\n".encode())
+        results.append([get_total_kmers(kmer, k), get_valid_kmers(kmer, k), get_positive_kmers(kmer, superstring, mask, k)])
+    process.stdin.close()
+    index = 0
+    for line in process.stdout:
+        total_count, valid_count, positive_count = results[index]
+        total_kmers, valid_kmers, found_kmers = map(int, line.decode().strip().split(","))
+        assert total_count == total_kmers, f"Expected {total_kmers} kmers, got {total_count}"
+        assert valid_count == valid_kmers, f"Expected {valid_kmers} valid kmers, got {valid_count}"
+        assert positive_count == found_kmers, f"Expected {found_kmers} positive kmers, got {positive_count}"
         print(".", end="")
-        if i % 100 == 99:
-            print(f" {i+1}/{len(kmers)}")
+        if (index + 1) % 50 == 0:
+            print()
+        index += 1
 
 def generate_random_kmers(k, superstring, num_queries):
     threshold = 0.5 * (len(superstring) > k)
@@ -69,13 +81,16 @@ def generate_random_kmers(k, superstring, num_queries):
             kmers.append("".join(random.choice("ACGT") for _ in range(k)))
     return kmers
 
+
 def main():
     print("Started testing")
     parser = argparse.ArgumentParser("check whether FMSI gives correct answers for a given dataset and possible a query file (otherwise positive and negative queries are generated randomly)")
     parser.add_argument("path", help="path to the fasta file on which ./kmers is verified")
     parser.add_argument("--k", type=int, help="the value of k; required")
+    parser.add_argument("--streaming_length", type=int, help="the number of kmers in a single line (default 1)", default=1)
     parser.add_argument("--query_path", help="the path to the query file; if not specified, random queries are generated")
     parser.add_argument("--num_queries", type=int, help="the number of queries to generate if no query file is specified", default=1000)
+    parser.add_argument("--optimize", type=bool, help="if queries should optimize for maximizing the number of ones in the mask", default=False)
     args = parser.parse_args()
 
     run_fmsi_index(args.path)
@@ -84,10 +99,11 @@ def main():
         with open(args.query_path, 'r') as f:
             kmers = f.readlines()
     else:
-        kmers = generate_random_kmers(args.k, superstring, args.num_queries)
-    process = create_fmsi_process(args.path, args.k)
+        kmers = generate_random_kmers(args.k + args.streaming_length - 1, superstring, args.num_queries)
+    process = create_fmsi_process(args.path, args.k, args.optimize)
     assert_correct_results(process, superstring, mask, kmers, args.k)
-    print("")
+    print()
+    print("OK")
 
 random.seed(42)
 main()

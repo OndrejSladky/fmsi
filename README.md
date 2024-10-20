@@ -66,9 +66,10 @@ export PATH="$PATH:$(pwd)"
 
 ### k-mer queries (stable)
 
-1. Compute a masked superstring for all k-mers from a given FASTA file by [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel).
+1. Compute an optimized masked superstring for all k-mers from a given FASTA file by [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel).
    ```
-   kmercamel -p input_file.fa -k 31 -c -o ms.fa
+   kmercamel -p input_file.fa -k 31 -c -o ms-no-opt.fa
+   kmercamel optimize -p ms-no-opt.fa -k 31 -c -o ms.fa
    ```
 
 2. Create an FMS index from the masked superstring:
@@ -78,8 +79,15 @@ export PATH="$PATH:$(pwd)"
 
 3. Query the index from a given query file (EOL-separated list of k-mers):
    ```
-   ./fmsi query -p ms.fa -q query.txt -k 31
+   ./fmsi query -p ms.fa -q query.txt -O
    ```
+
+#### Specific-case usage
+
+If you do not need support for streaming queries, use the `-s` flag for construction for additional memory savings when querying.
+
+If your mask superstring does not maximizes the number of ones in the mask, omit the `-O` optimization flag for query as otherwise you might get incorrect results.
+We, however, recommend to optimize the mask using `kmercamel optimize`.
 
 ### k-mer set operations (experimental)
 
@@ -148,12 +156,19 @@ FMSI then builds a simplified FM-index, which omits the sampled suffix array, wh
 It instead computes the SA-transformed mask, which makes it possible to determine the presence of a *k*-mer
 without the need to compute the original coordinates.
 
+Additionally, FMSI optionally constructs the kLCP array (a binary version of the truncated LCP array) 
+to allow *O(1)* time for a *k*-mer in streaming queries.
+
+
 The memory consumption of the index is split as follows:
-- $2.5$ bits per superstring character to store the BWT ($2.5 - 3.5$ bits per *k*-mer for typical genomes and pan-genomes).
+- $2.125$ bits per superstring character to store the BWT ($2.125 - 3$ bits per *k*-mer for typical genomes and pan-genomes).
 - Typically $0 - 0.8$ bits per *k*-mer to store the SA-transformed mask.
+- Optionally $1$ bit per superstring character to store the kLCP array.
+
 - $1$ byte per character of the largest entry in the queried fasta file (which is typically negligible).
 
 The construction of the index requires the full suffix array to be computed and requires up to 17 bytes per superstring character.
+
 
 
 ## Testing
