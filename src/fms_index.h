@@ -430,7 +430,7 @@ void dump_index(const fms_index& index, const std::string &fn) {
     out.close();
 }
 
-fms_index load_index(const std::string &fn) {
+fms_index load_index(const std::string &fn, bool use_klcp = true) {
     fms_index index;
     auto basename = fn + ".fmsi";
     sdsl::load_from_file(index.ac_gt, basename + ".ac_gt");
@@ -440,7 +440,7 @@ fms_index load_index(const std::string &fn) {
     sdsl::load_from_file(index.gt, basename + ".gt");
     index.gt_rank = sdsl::rank_support_v5<1>(&index.gt);
     sdsl::load_from_file(index.sa_transformed_mask, basename + ".mask");
-    if (std::filesystem::exists(basename + ".klcp")) {
+    if (std::filesystem::exists(basename + ".klcp") && use_klcp) {
         sdsl::load_from_file(index.klcp, basename + ".klcp");
     }
     std::ifstream in(basename + ".misc");
