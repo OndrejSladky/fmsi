@@ -56,6 +56,12 @@ However, this feature is currently only experimental and requires rather signifi
 - Zlib
 
 **Installation:**
+FMSI can be installed using [bioconda](https://bioconda.github.io/):
+```
+conda install bioconda::fmsi
+```
+
+Alternatively, FMSI can be built directly from source:
 ```
 git clone --recursive https://github.com/OndrejSladky/fmsi
 cd fmsi && make -j
