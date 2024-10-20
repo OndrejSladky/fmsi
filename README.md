@@ -83,9 +83,9 @@ export PATH="$PATH:$(pwd)"
    ./fmsi index -p ms.fa
    ```
 
-3. Query the index from a given query file (EOL-separated list of k-mers):
+3. Query the index from a given query FASTA file with k-mers:
    ```
-   ./fmsi query -p ms.fa -q query.txt -O
+   ./fmsi query -p ms.fa -q query.fa -O
    ```
 
 #### Specific-case usage
