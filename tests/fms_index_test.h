@@ -8,11 +8,11 @@ namespace {
     fms_index get_dummy_index() {
         fms_index ret = { //CAGGTAG$, 1011100$
                 sdsl::bit_vector({1, 1, 0, 0, 0, 0, 1, 1}),
-                sdsl::rank_support_v<1>(),
+                sdsl::rank_support_v5<1>(),
                 sdsl::bit_vector({1, 0, 0, 0}),
-                sdsl::rank_support_v<1>(),
+                sdsl::rank_support_v5<1>(),
                 sdsl::bit_vector({0,1,0,0}),
-                sdsl::rank_support_v<1>(),
+                sdsl::rank_support_v5<1>(),
                 sdsl::rrr_vector<>({0, 0, 0, 1, 0, 1, 1, 1}),
                 std::vector<size_t>({1, 3, 4, 7}),
                 3
@@ -25,11 +25,11 @@ namespace {
     fms_index get_dummy_index2() {
         fms_index ret = { //GGTAAGA$, 11001000$
                 sdsl::bit_vector({0, 1, 1, 0, 0, 0, 1, 1, 1}),
-                sdsl::rank_support_v<1>(),
+                sdsl::rank_support_v5<1>(),
                 sdsl::bit_vector({0, 0, 0, 0}),
-                sdsl::rank_support_v<1>(),
+                sdsl::rank_support_v5<1>(),
                 sdsl::bit_vector({0,1,0,1,0}),
-                sdsl::rank_support_v<1>(),
+                sdsl::rank_support_v5<1>(),
                 sdsl::rrr_vector<>({0,0,1,0,0,1,1,0,0}),
                 std::vector<size_t>({1, 4, 4, 7}),
                 5
@@ -42,11 +42,11 @@ namespace {
     fms_index get_dummy_index3() {
         fms_index ret = { // CACACAT$, 1110100$
                 sdsl::bit_vector({1,0,0,0,0,0,0,0}),
-                sdsl::rank_support_v<1>(),
+                sdsl::rank_support_v5<1>(),
                 sdsl::bit_vector({1,1,1,0,0,0,0}),
-                sdsl::rank_support_v<1>(),
+                sdsl::rank_support_v5<1>(),
                 sdsl::bit_vector({1}),
-                sdsl::rank_support_v<1>(),
+                sdsl::rank_support_v5<1>(),
                 sdsl::rrr_vector<>({0,1,0,0,1,1,1,0}),
                 std::vector<size_t>({1, 4, 7, 7}),
                 5,
