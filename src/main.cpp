@@ -100,6 +100,7 @@ static int usage_query() {
             << std::endl;
   std::cerr << "  '-O' - Use speed optimization that leverages that the mask maximizes the number of ones. Use only when this is the case."
             << std::endl;
+  std::cerr << "  '-s' - Do not optimize for streaming queries in order to save memory" << std::endl;
   std::cerr << "  '-F' - Print the results per each entry in the query file." << std::endl;
   std::cerr << "  `-h` - Prints this help and terminates." << std::endl;
   std::cerr << "Advanced parameters:" << std::endl;
@@ -275,7 +276,8 @@ int ms_query(int argc, char *argv[]) {
   std::string f_name = "or";
   std::function<bool(size_t, size_t)> f = mask_function("or");
   bool flush = false;
-  while ((c = getopt(argc, argv, "p:f:hq:k:FO")) >= 0) {
+  bool has_klcp = true;
+  while ((c = getopt(argc, argv, "p:f:hq:k:FOs")) >= 0) {
     switch (c) {
     case 'f':
       try {
@@ -306,6 +308,8 @@ int ms_query(int argc, char *argv[]) {
             f = mask_function("all");
         }
         break;
+    case 's':
+      has_klcp = false;
     case 'F':
       flush = true;
       break;
@@ -321,8 +325,8 @@ int ms_query(int argc, char *argv[]) {
     return usage_query();
   }
 
-  fms_index index = load_index(fn);
-  bool has_klcp = index.klcp.size() > 0;
+  fms_index index = load_index(fn, has_klcp);
+  has_klcp = index.klcp.size() > 0;
   int index_k = index.k;
   if (k != 0 && k != index_k) {
     std::cerr << "Mismatch. Provided k (" << k << ") does not match the k of the index (" << index_k << ")." << std::endl;
