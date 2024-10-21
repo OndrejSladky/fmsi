@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <math.h>
 
 static int usage() {
   std::cerr << "FMSI is a tool for efficient indexing of Masked Superstrings."
@@ -346,10 +347,11 @@ int ms_query(int argc, char *argv[]) {
 
   std::cin.tie(&std::cout);
 
-  // Less than 1% overhead for the chunking (while gaining superior time from prediction).
-  int64_t max_sequence_chunk_length = 5000;
-
   while ((sequence_length = kseq_read(seq)) >= 0) {
+    // Small overhead for the chunking (while gaining superior time from prediction).
+    int64_t max_sequence_chunk_length = 400;
+    max_sequence_chunk_length = std::max((int64_t)10, std::min(max_sequence_chunk_length, 2*(int64_t)std::sqrt(sequence_length)));
+
     size_t current_kmers = std::max(int64_t(0), sequence_length - k + 1);
     size_t current_valid_kmers = 0;
     size_t current_found_kmers = 0;
