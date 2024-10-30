@@ -23,7 +23,6 @@ static int usage() {
   std::cerr << "    `index`   - Creates a BWT based index of the given masked superstring." << std::endl;
   std::cerr << "    `query`   - Queries a k-mer against an index." << std::endl;
   std::cerr << "    `export`  - Export the underlying masked superstring." << std::endl;
-  std::cerr << "    `clean`   - Cleans the files stored for an index." << std::endl;
   std::cerr << "Command (experimental):" << std::endl;
   std::cerr << "    `union`   - Compute union of k-mers from several indices." << std::endl;
   std::cerr << "    `inter`   - Compute intersection of k-mers from several indices." << std::endl;
