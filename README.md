@@ -40,7 +40,12 @@ to appear on *bioRxiv*, 2024.
 
 To construct an index (the `fmsi index` subcommand), FMSI accepts as input (see the `-p` parameter) a masked superstring of the $k$-mer set.
 The masked superstring can be computed by [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel).
-It then stores the index in files with the same prefix and the `.fmsi` extension.
+It then stores the index file in files with the same prefix and the `.fmsi.[component]` extension.
+There are these components:
+- `.ac_gt`, `.ac` and `.gt` for storing the nodes of the wavelet tree of BWT
+- `.mask` for storing the RRR-compressed SA-transformed mask
+- `.klcp` for storing the kLCP array (optional)
+- `.misc` for storing counts, dollar position and k
 
 To query the index (the `fmsi query` subcommand), FMSI accepts a text file with $k$-mers on separate lines to query (see the `-q` parameter).
 In a very near future, we will however update this to accept a FASTA file and allow for streaming queries.
