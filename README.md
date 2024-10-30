@@ -23,9 +23,13 @@
 
 ## Introduction
 
-FMSI is a highly memory-efficient tool (typically 3-5 memory bits / indexed k-mer) for performing membership queries on single $k$-mer sets.
+FMSI is a highly memory-efficient tool for performing membership queries on single $k$-mer sets.
 FMSI uses [masked superstrings](https://doi.org/10.1101/2024.03.06.583483) for storing the $k$-mer sets to ensure high compressibility for a wide range of different $k$-mer sets,
 and implements FMS-index, a simplification of the FM-index. It supports both streaming and single queries. The functionality implemented in FMSI is based on the following papers:
+
+The memory consumption for FMSI are (w/o kLCP which is additional 1bit/superstring char):
+- Queries: 2.41 bits / canonical 31-mer with human genome; ~3 bits / canonical 31-mer for _E. coli_ pangenome; ~7 bits / canonical 31-mer for _SARS-CoV-2_
+- Construction: 46MB for human genome
 
 [1] Ondřej Sladký, Pavel Veselý, and Karel Břinda: FroM Superstring to Indexing: a space-efficient index for unconstrained *k*-mer sets using the Masked Burrows-Wheeler Transform (MBWT).
 to appear on *bioRxiv*, 2024.
