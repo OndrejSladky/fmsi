@@ -665,7 +665,7 @@ int ms_clean(int argc, char *argv[]) {
   std::filesystem::remove(fn + ".fmsi.gt");
   std::filesystem::remove(fn + ".fmsi.mask");
   std::filesystem::remove(fn + ".fmsi.misc");
-  if (std::filesystem::exists(fn + "fmsi.klcp")) {
+  if (std::filesystem::exists(fn + ".fmsi.klcp")) {
     std::filesystem::remove(fn + ".fmsi.klcp");
   }
   std::cerr << "Cleaned " << fn << std::endl;
