@@ -420,7 +420,9 @@ void dump_index(const fms_index& index, const std::string &fn) {
     sdsl::store_to_file(index.ac, basename + ".ac");
     sdsl::store_to_file(index.gt, basename + ".gt");
     sdsl::store_to_file(index.sa_transformed_mask, basename + ".mask");
-    sdsl::store_to_file(index.klcp, basename + ".klcp");
+    if (index.klcp.size() > 0) {
+        sdsl::store_to_file(index.klcp, basename + ".klcp");
+    }
     std::ofstream out(basename + ".misc");
     out << index.dollar_position << std::endl;
     for (auto c : index.counts) {

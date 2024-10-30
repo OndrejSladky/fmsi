@@ -14,181 +14,153 @@
 #include <math.h>
 
 static int usage() {
-  std::cerr << "FMSI is a tool for efficient indexing of Masked Superstrings."
-            << std::endl;
-  std::cerr << std::endl << "The recognized commands are:" << std::endl;
-  std::cerr << "  `index` - Creates a BWT based index of the given masked "
-               "superstring."
-            << std::endl;
-  std::cerr << "  `query` - Queries a k-mer against an index." << std::endl;
-  std::cerr << "The following are only experimental subcommands and have a larger memory and time consumption:" << std::endl;
-  std::cerr << "  `union` - Compute union of k-mers from several indices." << std::endl;
-  std::cerr << "  `inter` - Compute intersection of k-mers from several indices." << std::endl;
-  std::cerr << "  `diff`  - Compute set difference of k-mers from several indices." << std::endl;
-  std::cerr << "  `symdiff` - Compute symmetric difference of k-mers from several indices." << std::endl;
-  std::cerr << "  `clean` - Cleans the files stored for index." << std::endl;
-  std::cerr << "  `merge` - Merges several indices." << std::endl;
-  std::cerr << "  `compact` - Compacts the given index." << std::endl;
-  std::cerr << "  `export` - Export the underlying masked superstring." << std::endl;
-  std::cerr << "  `-v`    - Prints the version of the program." << std::endl;
-  std::cerr << "  `-h`    - Prints this help." << std::endl;
+  std::cerr << std::endl;
+  std::cerr << "Program: FMSI - a tool for space-efficient k-mer set indexing via masked superstrings." << std::endl;
+  std::cerr << "Version: " << VERSION << std::endl;
+  std::cerr << "Contact: Ondrej Sladky (ondra.sladky@gmail.com)" << std::endl << std::endl;
+  std::cerr << "Usage:   fmsi <command> [options]" << std::endl << std::endl;
+  std::cerr << "Command (stable):" << std::endl;
+  std::cerr << "    index   - Creates a BWT based index of the given masked superstring." << std::endl;
+  std::cerr << "    query   - Queries k-mers against an index." << std::endl;
+  std::cerr << "    export  - Print the underlying masked superstring to stdout." << std::endl << std::endl;
+  std::cerr << "Command (experimental, using f-MS framework):" << std::endl;
+  std::cerr << "    union   - Compute union of k-mers from several indices." << std::endl;
+  std::cerr << "    inter   - Compute intersection of k-mers from several indices." << std::endl;
+  std::cerr << "    diff    - Compute set difference of k-mers from several indices." << std::endl;
+  std::cerr << "    symdiff - Compute symmetric difference of k-mers from several indices." << std::endl;
+  std::cerr << "    merge   - Merges several indices." << std::endl;
+  std::cerr << "    compact - Compacts the given index." << std::endl << std::endl;
   return 1;
 }
 
 static int usage_index() {
-  std::cerr
-      << "FMSI Index creates the index for a given masked superstring."
-      << std::endl;
-  std::cerr << std::endl << "The recognized arguments are:" << std::endl;
-  std::cerr << "  `-p path_to_fasta` - The path to the fasta file with masked "
-               "superstring to be indexed. This is a required argument."
+  std::cerr << std::endl;
+  std::cerr << "Usage:   fmsi index [options]" << std::endl << std::endl;
+  std::cerr << "Options:" << std::endl;
+  std::cerr << "    -p FILE - path to masked "
+               "superstring [required]"
             << std::endl;
-  std::cerr << "  `-k value_of_k`    - The size of queried k-mers. If not set,"
-               "automatically inferred from number of trailing mask zeros."
+  std::cerr << "    -k INT  - size of k-mers [recommended, default: number of mask trailing zeros - 1]"
             << std::endl;
-  std::cerr << "  `-s`               - Do not optimize for streaming queries."
-            << std::endl;
-  std::cerr << "  `-h`               - Prints this help and terminates."
-            << std::endl;
+  std::cerr << "    -s      - do not compute the kLCP array used for faster streaming queries."
+            << std::endl << std::endl;
+  std::cerr << "Note: `fmsi index` accepts only masked superstrings - these can be computed e.g. by KmerCamel from any FASTA file." << std::endl << std::endl;
   return 1;
 }
 
 static int usage_merge() {
-  std::cerr << "FMSI Merge merges several indices." << std::endl;
-  std::cerr << std::endl << "The recognized arguments are:" << std::endl;
-  std::cerr << "  `-p path_to_fasta`  - The path to the fasta file which "
-               "should be merged. Can be provided multiple times. It is "
-               "expected that it appears at least twice."
+  std::cerr << std::endl << 
+      "Usage:   fmsi merge [options]"
+      << std::endl << std::endl;
+  std::cerr << std::endl << "Options:" << std::endl;
+  std::cerr << "  `-p path_to_fasta`  - The path to the fasta file with "
+                "input sets. Can be provided multiple times. It is "
+                "expected that it appears at least twice."
             << std::endl;
-  std::cerr << "  `-r path_of_result` - The path where the result should be "
-               "stored. This is a required argument."
-            << std::endl;
-  std::cerr << "  `-h`                - Prints this help and terminates."
-            << std::endl;
+    std::cerr << "  `-r path_of_result` - The path where the result should be "
+                 "stored. Required."
+              << std::endl;
+    std::cerr << "  `-k value_of_k` - The size of queried k-mers (only used to check with the index one)."
+              << std::endl;
+    std::cerr << std::endl;
   return 1;
 }
 
 static int usage_op(std::string op) {
-    std::cerr << "FMSI " << op << " performs the corresponding set operation on several indices." << std::endl;
-    std::cerr << std::endl << "The recognized arguments are:" << std::endl;
-    std::cerr << "  `-p path_to_fasta`  - The path to the fasta file with "
-                 "input sets. Can be provided multiple times. It is "
-                 "expected that it appears at least twice."
-              << std::endl;
+  std::cerr << std::endl << 
+      "Usage:   fmsi " << op << " [options]"
+      << std::endl << std::endl;
+  std::cerr << std::endl << "Options:" << std::endl;
+  std::cerr << "  `-p path_to_fasta`  - The path to the fasta file with "
+                "input sets. Can be provided multiple times. It is "
+                "expected that it appears at least twice."
+            << std::endl;
     std::cerr << "  `-r path_of_result` - The path where the result should be "
-                 "stored. This is a required argument."
+                 "stored. Required."
               << std::endl;
     std::cerr << "  `-k value_of_k` - The size of queried k-mers (only used to check with the index one)."
               << std::endl;
-    std::cerr << "  `-h`                - Prints this help and terminates."
-              << std::endl;
+    std::cerr << std::endl;
     return 1;
 }
 
+void usage_functions() {
+  std::cerr << "  -f FUNCTION - Demasking function to determine k-mer presence; recognized functions:"
+            << std::endl;
+  std::cerr << "    or      - represented when at least 1 ON occurrence [default]"
+            << std::endl;
+  std::cerr << "    all     - all occurrence are either ON or "
+               "OFF (equivalent to -O flag for queries)"
+            << std::endl;
+  std::cerr << "    and     - represented when no OFF occurrence"
+            << std::endl;
+  std::cerr << "    xor     - represented when an odd number "
+               "of ON occurrences"
+            << std::endl;
+  std::cerr << "    INT-INT - represneted when in the bounds"
+            << std::endl;
+}
+
 static int usage_query() {
-  std::cerr << "FMSI Query return whether the provided $k$-mer is in the "
-               "masked superstring or not."
+  std::cerr << std::endl;
+  std::cerr << "Usage:   fmsi query [options]" << std::endl << std::endl;
+  std::cerr << "Options (stable):" << std::endl;
+  std::cerr << "  -p FILE - Index prefix (masked superstring file) [required]"
             << std::endl;
-  std::cerr
-      << "`./fmsi index` must be run on the provided fasta file beforehand."
-      << std::endl;
-  std::cerr << std::endl << "The recognized arguments are:" << std::endl;
-  std::cerr << "  `-p path_to_fasta` - The path to the fasta file from which "
-               "the index was created. Required."
+  std::cerr << "  -q FILE - Path to FASTA/FASTQ with queries [default: stdin]"
             << std::endl;
-  std::cerr << "  `-q path_to_queries` - The path to the file with k-mers to "
-               "query. Set '-' for standard input (default)."
+  std::cerr << "  -k INT  - Size of k-mers, check with the index k [recommended]"
             << std::endl;
-  std::cerr << "  '-O' - Use speed optimization that leverages that the mask maximizes the number of ones. Use only when this is the case."
-            << std::endl;
-  std::cerr << "  '-s' - Do not optimize for streaming queries in order to save memory" << std::endl;
-  std::cerr << "  '-F' - Print the results per each entry in the query file." << std::endl;
-  std::cerr << "  `-h` - Prints this help and terminates." << std::endl;
-  std::cerr << "Advanced parameters:" << std::endl;
-  std::cerr << "  `-f function`      - A function to determine whether a "
-               "$k$-mer is represented based on the number of set and unset "
-               "occurrences. The recognized functions are following:"
-            << std::endl;
-  std::cerr << "      `or`  - Consider $k$-mer represented when any of its "
-               "occurrences is set."
-            << std::endl;
-  std::cerr << "      `all` - Assume that all occurrence are either set or "
-               "unset and determine the presence by arbitrary occurrence."
-            << std::endl;
-  std::cerr << "      `and` - Consider $k$-mer represented when all its "
-               "occurrences are set."
-            << std::endl;
-  std::cerr << "      `xor` - Consider $k$-mer represented when an odd number "
-               "of occurrences is set."
-            << std::endl;
-  std::cerr << "      `X-Y` (where X and Y can be any integers) - Consider "
-               "$k$-mer represented when its number of set occurrences is "
-               "between X and Y (inclusive)."
-            << std::endl;
-    std::cerr << "  `-k value_of_k` - The size of queried k-mers. If not set,"
-                 "automatically inferred from the index. Only used for automatic k validation"
-              << std::endl;
+  std::cerr << "  -s      - Do not use the kLCP array - saves memory but slows down streaming queries" << std::endl;
+  std::cerr << "  -O      - Use speed optimizations, use whenever possible." << std::endl;
+  std::cerr << "            Do not use if mask not maximizing the number of ones - leads to incorrect results." << std::endl;
+  std::cerr << "  -F      - Print the results per each entry in the query file." << std::endl << std::endl;
+  std::cerr << "Parameters (experimental, using f-MS framework):" << std::endl;
+  usage_functions();
+  std::cerr << std::endl;
   return 1;
 }
 
 static int usage_normalize() {
-  std::cerr << "FMSI Compact compacts the given index so that it "
-               "does not occupy more space than needed."
+  std::cerr << std::endl << 
+      "Usage:   fmsi compact [options]"
+      << std::endl << std::endl;
+  std::cerr << std::endl << "Options (all experimental):" << std::endl;
+  std::cerr << "   `-p path_to_ms` - The path to the fasta file with masked "
+               "superstring that is indexed. Required."
             << std::endl;
   std::cerr << std::endl << "The recognized arguments are:" << std::endl;
-  std::cerr << "  `-p path_to_fasta` - The path to the fasta file from which "
+  std::cerr << "    `-p path_to_fasta` - The path to the fasta file from which "
                "the index was created. Required."
             << std::endl;
-  std::cerr << "  `-k value_of_k` - The size of queried k-mers."
+  std::cerr << "    `-k value_of_k` - The size of queried k-mers."
             << std::endl;
-  std::cerr << "  `-f function`      - A function to determine whether a "
-               "$k$-mer is represented based on the number of set and unset "
-               "occurrences. The recognized functions are following:"
-            << std::endl;
-  std::cerr << "      `or`  - Consider $k$-mer represented when any of its "
-               "occurrences is set."
-            << std::endl;
-  std::cerr << "      `all` - Assume that all occurrence are either set or "
-               "unset and determine the presence by arbitrary occurrence."
-            << std::endl;
-  std::cerr << "      `and` - Consider $k$-mer represented when all its "
-               "occurrences are set."
-            << std::endl;
-  std::cerr << "      `xor` - Consider $k$-mer represented when an odd number "
-               "of occurrences is set."
-            << std::endl;
-  std::cerr << "      `X-Y` (where X and Y can be any integers) - Consider "
-               "$k$-mer represented when its number of set occurrences is "
-               "between X and Y (inclusive)."
-            << std::endl;
-  std::cerr << "  `-s` - Only print the masked superstring and do not "
+  std::cerr << "    `-s` - Only print the compacted masked superstring and do not "
                "compact the index"
             << std::endl;
-  std::cerr << "  `-h` - Prints this help and terminates." << std::endl;
+  usage_functions();
+  std::cerr << std::endl;
   return 1;
 }
 
 static int usage_export() {
-    std::cerr << "FMSI Export exports the indexed masked superstring to its string form."
-              << std::endl;
-    std::cerr << std::endl << "The recognized arguments are:" << std::endl;
-    std::cerr << "  `-p path_to_fasta` - The path to the fasta file from which "
-                 "the index was created. Required."
-              << std::endl;
-    std::cerr << "  `-h` - Prints this help and terminates." << std::endl;
+  std::cerr << std::endl << 
+      "Usage:   fmsi export [options]"
+      << std::endl << std::endl;
+  std::cerr << std::endl << "Options:" << std::endl;
+  std::cerr << "  -p FILE - Index prefix (masked superstring file) [required]"
+            << std::endl << std::endl;
     return 1;
 }
 
 static int usage_clean() {
-  std::cerr
-      << "FMSI Index creates the index for a given masked superstring."
-      << std::endl;
-  std::cerr << std::endl << "The recognized arguments are:" << std::endl;
+  std::cerr << std::endl << 
+      "Usage:   fmsi clean [options]"
+      << std::endl << std::endl;
+  std::cerr << std::endl << "Options:" << std::endl;
   std::cerr << "  `-p path_to_fasta` - The path to the fasta file with masked "
-               "superstring that is indexed. This is a required argument."
-            << std::endl;
-  std::cerr << "  `-h`               - Prints this help and terminates."
-            << std::endl;
+               "superstring that is indexed. Required."
+            << std::endl << std::endl;
   return 1;
 }
 
@@ -217,6 +189,10 @@ int ms_index(int argc, char *argv[]) {
       k = atoi(optarg);
       break;
     case 'p':
+      if (fn != "") {
+        std::cerr << "ERROR: Parameter [-p] provided multiple times" << std::endl;
+        return usage_index();
+      }
       fn = optarg;
       break;
     case 's':
@@ -230,7 +206,7 @@ int ms_index(int argc, char *argv[]) {
     usage_index();
     return 0;
   } else if (fn.empty()) {
-    std::cerr << "Path to the fasta file is a required argument." << std::endl;
+    std::cerr << "ERROR: Path to the masked superstring [-p] is a required argument." << std::endl;
     return usage_index();
   }
   if (l_param_set) {
@@ -240,7 +216,7 @@ int ms_index(int argc, char *argv[]) {
   std::cerr << "Starting " << fn << std::endl;
   auto ms = read_masked_superstring(fn);
   if (ms.size() == 0) {
-    std::cerr << "The file '" << fn
+    std::cerr << "ERROR: The file '" << fn
               << "' is in incorrect format. It is supposed to be a fasta file "
                  "with a single entry, the masked superstring"
               << std::endl;
@@ -285,7 +261,7 @@ int ms_query(int argc, char *argv[]) {
         f_name = optarg;
         f = mask_function(optarg);
       } catch (std::invalid_argument &) {
-        std::cerr << "Function '" << optarg << "' not recognized." << std::endl;
+        std::cerr << "ERROR: Function '" << optarg << "' not recognized." << std::endl;
         return usage_query();
       }
       break;
@@ -323,15 +299,24 @@ int ms_query(int argc, char *argv[]) {
     usage_query();
     return 0;
   } else if (fn.empty()) {
-    std::cerr << "Path to the fasta file is a required argument." << std::endl;
+    std::cerr << "ERROR: Path to the fasta file is a required argument." << std::endl;
     return usage_query();
   }
 
   fms_index index = load_index(fn, has_klcp);
-  has_klcp = index.klcp.size() > 0;
+
+  if (index.sa_transformed_mask.size() == 0) {
+    std::cerr << "ERROR: index not correctly loaded. Ensure that you correctly call `fmsi index` before." << std::endl;
+    return usage_query();
+  }
+
+  if (has_klcp != (index.klcp.size() > 0)) {
+    std::cerr << "ERROR: kLCP array was not constructed for the given index. Either construct it again without the `-s` flag or use `query -s` which slows down streaming queries." << std::endl;
+    return usage_query();
+  }
   int index_k = index.k;
   if (k != 0 && k != index_k) {
-    std::cerr << "Mismatch. Provided k (" << k << ") does not match the k of the index (" << index_k << ")." << std::endl;
+    std::cerr << "ERROR: Mismatch. Provided k (" << k << ") does not match the k of the index (" << index_k << ")." << std::endl;
     return usage_query();
   }
   if (k == 0) {
@@ -559,7 +544,13 @@ int ms_export(int argc, char *argv[]) {
     }
 
     fms_index index = load_index(fn);
-    std::cout << ">exported f-masked superstring" << std::endl;
+
+    if (index.sa_transformed_mask.size() == 0) {
+      std::cerr << "ERROR: index not correctly loaded. Ensure that you correctly call `fmsi index` before." << std::endl;
+      return usage_export();
+    }
+
+    std::cout << ">exported masked superstring" << std::endl;
     std::cout << export_ms(index) << std::endl;
     return 0;
 }
@@ -680,6 +671,9 @@ int ms_clean(int argc, char *argv[]) {
   std::filesystem::remove(fn + ".fmsi.gt");
   std::filesystem::remove(fn + ".fmsi.mask");
   std::filesystem::remove(fn + ".fmsi.misc");
+  if (std::filesystem::exists(fn + ".fmsi.klcp")) {
+    std::filesystem::remove(fn + ".fmsi.klcp");
+  }
   std::cerr << "Cleaned " << fn << std::endl;
   return 0;
 }
