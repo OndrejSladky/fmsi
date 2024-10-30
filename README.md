@@ -83,12 +83,12 @@ export PATH="$PATH:$(pwd)"
 
 2. Create an FMS index from the masked superstring:
    ```
-   fmsi index -p ms.fa
+   fmsi index -p ms.fa -k 31
    ```
 
 3. Query the index from a given query FASTA file with k-mers:
    ```
-   fmsi query -p ms.fa -q query.fa -O
+   fmsi query -p ms.fa -q query.fa -k 31 -O
    ```
 
 #### Specific-case usage
