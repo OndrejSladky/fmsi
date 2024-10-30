@@ -21,8 +21,8 @@ static int usage() {
   std::cerr << "Usage:   fmsi <command> [options]" << std::endl << std::endl;
   std::cerr << "Command (stable):" << std::endl;
   std::cerr << "    index   - Creates a BWT based index of the given masked superstring." << std::endl;
-  std::cerr << "    query   - Queries a k-mer against an index." << std::endl;
-  std::cerr << "    export  - Export the underlying masked superstring." << std::endl << std::endl;
+  std::cerr << "    query   - Queries k-mers against an index." << std::endl;
+  std::cerr << "    export  - Print the underlying masked superstring to stdout." << std::endl << std::endl;
   std::cerr << "Command (experimental, using f-MS framework):" << std::endl;
   std::cerr << "    union   - Compute union of k-mers from several indices." << std::endl;
   std::cerr << "    inter   - Compute intersection of k-mers from several indices." << std::endl;
@@ -107,10 +107,13 @@ static int usage_query() {
   std::cerr << "Options (stable):" << std::endl;
   std::cerr << "  -p FILE - Index prefix (masked superstring file) [required]"
             << std::endl;
+  std::cerr << "  -q FILE - Path to FASTA/FASTQ with queries [default: stdin]"
+            << std::endl;
   std::cerr << "  -k INT  - Size of k-mers, check with the index k [recommended]"
             << std::endl;
   std::cerr << "  -s      - Do not use the kLCP array - saves memory but slows down streaming queries" << std::endl;
-  std::cerr << "  -O      - Use speed optimizations. Do not use if mask not maximizing the number of ones - leads to incorrect results." << std::endl;
+  std::cerr << "  -O      - Use speed optimizations, use whenever possible." << std::endl;
+  std::cerr << "            Do not use if mask not maximizing the number of ones - leads to incorrect results." << std::endl;
   std::cerr << "  -F      - Print the results per each entry in the query file." << std::endl << std::endl;
   std::cerr << "Parameters (experimental, using f-MS framework):" << std::endl;
   usage_functions();
