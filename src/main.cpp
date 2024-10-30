@@ -310,6 +310,12 @@ int ms_query(int argc, char *argv[]) {
   }
 
   fms_index index = load_index(fn, has_klcp);
+
+  if (index.sa_transformed_mask.size() == 0) {
+    std::cerr << "ERROR: index not correctly loaded. Ensure that you correctly call `fmsi index` before." << std::endl;
+    return usage_query();
+  }
+
   if (has_klcp != (index.klcp.size() > 0)) {
     std::cerr << "ERROR: kLCP array was not constructed for the given index. Either construct it again without the `-s` flag or use `query -s` which slows down streaming queries." << std::endl;
     return usage_query();
@@ -544,6 +550,12 @@ int ms_export(int argc, char *argv[]) {
     }
 
     fms_index index = load_index(fn);
+
+    if (index.sa_transformed_mask.size() == 0) {
+      std::cerr << "ERROR: index not correctly loaded. Ensure that you correctly call `fmsi index` before." << std::endl;
+      return usage_export();
+    }
+
     std::cout << ">exported f-masked superstring" << std::endl;
     std::cout << export_ms(index) << std::endl;
     return 0;
