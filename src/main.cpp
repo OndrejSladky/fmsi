@@ -14,24 +14,26 @@
 #include <math.h>
 
 static int usage() {
-  std::cerr << "FMSI is a tool for efficient indexing of Masked Superstrings."
-            << std::endl;
-  std::cerr << std::endl << "The recognized commands are:" << std::endl;
-  std::cerr << "  `index` - Creates a BWT based index of the given masked "
-               "superstring."
-            << std::endl;
-  std::cerr << "  `query` - Queries a k-mer against an index." << std::endl;
-  std::cerr << "The following are only experimental subcommands and have a larger memory and time consumption:" << std::endl;
-  std::cerr << "  `union` - Compute union of k-mers from several indices." << std::endl;
-  std::cerr << "  `inter` - Compute intersection of k-mers from several indices." << std::endl;
-  std::cerr << "  `diff`  - Compute set difference of k-mers from several indices." << std::endl;
-  std::cerr << "  `symdiff` - Compute symmetric difference of k-mers from several indices." << std::endl;
-  std::cerr << "  `clean` - Cleans the files stored for index." << std::endl;
-  std::cerr << "  `merge` - Merges several indices." << std::endl;
-  std::cerr << "  `compact` - Compacts the given index." << std::endl;
-  std::cerr << "  `export` - Export the underlying masked superstring." << std::endl;
-  std::cerr << "  `-v`    - Prints the version of the program." << std::endl;
-  std::cerr << "  `-h`    - Prints this help." << std::endl;
+  std::cerr << "Program: FMSI - a tool for space-efficient k-mer set indexing via masked superstrings." << std::endl;
+  std::cerr << "Version: " << VERSION << std::endl;
+  std::cerr << "Contact: Ondrej Sladky (ondra.sladky@gmail.com)" << std::endl << std::endl;
+  std::cerr << "Usage:   `fmsi <command> [options]`" << std::endl << std::endl;
+  std::cerr << "Command (stable):" << std::endl;
+  std::cerr << "    `index`   - Creates a BWT based index of the given masked superstring." << std::endl;
+  std::cerr << "    `query`   - Queries a k-mer against an index." << std::endl;
+  std::cerr << "    `export`  - Export the underlying masked superstring." << std::endl;
+  std::cerr << "    `clean`   - Cleans the files stored for an index." << std::endl;
+  std::cerr << "    `-v`      - Prints the version of the program." << std::endl;
+  std::cerr << "    `-h`      - Prints this help." << std::endl << std::endl;
+  std::cerr << "Command (experimental):" << std::endl;
+  std::cerr << "    `union`   - Compute union of k-mers from several indices." << std::endl;
+  std::cerr << "    `inter`   - Compute intersection of k-mers from several indices." << std::endl;
+  std::cerr << "    `diff`    - Compute set difference of k-mers from several indices." << std::endl;
+  std::cerr << "    `symdiff` - Compute symmetric difference of k-mers from several indices." << std::endl;
+  std::cerr << "    `merge`   - Merges several indices." << std::endl;
+  std::cerr << "    `compact` - Compacts the given index." << std::endl;
+  std::cerr << std::endl << "Note 1: `fmsi index` needs to be run prior to `fmsi query`." << std::endl;
+  std::cerr <<              "Note 2: `fmsi index` accepts only masked superstrings - these can be computed e.g. by KmerCamel from any FASTA file." << std::endl;
   return 1;
 }
 
