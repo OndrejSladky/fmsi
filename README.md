@@ -42,8 +42,8 @@ To construct an index (the `fmsi index` subcommand), FMSI accepts as input (see 
 The masked superstring can be computed by [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel).
 It then stores the index file in files with the same prefix and the `.fmsi.[component]` extension.
 There are these components:
-- `.ac_gt`, `.ac` and `.gt` for storing the BWT
-- `.mask` for storing the SA-transformed mask
+- `.ac_gt`, `.ac` and `.gt` for storing the nodes of the wavelet tree of BWT
+- `.mask` for storing the RRR-compressed SA-transformed mask
 - `.klcp` for storing the kLCP array (optional)
 - `.misc` for storing counts, dollar position and k
 
