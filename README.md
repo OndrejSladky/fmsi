@@ -205,6 +205,24 @@ See [Releases](https://github.com/OndrejSladky/fmsi/releases).
 
 [MIT](https://github.com/OndrejSladky/fmsi/blob/master/LICENSE.txt)
 
+## Citation
+
+> Ondřej Sladký, Pavel Veselý, Karel Břinda:
+**"FroM Superstring to Indexing: a space-efficient index for unconstrained *k*-mer sets using the Masked Burrows-Wheeler Transform (MBWT)"**, bioRxiv 2024.10.30.621029; doi: https://doi.org/10.1101/2024.10.30.621029 [doi: 10.1101/2024.10.30.621029](https://doi.org/10.1101/2024.10.30.621029).
+
+```
+@article {Sladky2024.10.30.621029,
+	author = {Sladk{\'y}, Ond{\v r}ej and Vesel{\'y}, Pavel and B{\v r}inda, Karel},
+	title = {FroM Superstring to Indexing: a space-efficient index for unconstrained k-mer sets using the Masked Burrows-Wheeler Transform (MBWT)},
+	elocation-id = {2024.10.30.621029},
+	year = {2024},
+	doi = {10.1101/2024.10.30.621029},
+	publisher = {Cold Spring Harbor Laboratory},
+	URL = {https://www.biorxiv.org/content/early/2024/11/03/2024.10.30.621029},
+	eprint = {https://www.biorxiv.org/content/early/2024/11/03/2024.10.30.621029.full.pdf},
+	journal = {bioRxiv}
+}
+```
 
 ## Contact
 
