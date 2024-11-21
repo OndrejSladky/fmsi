@@ -28,8 +28,8 @@ FMSI uses [masked superstrings](https://doi.org/10.1101/2024.03.06.583483) for s
 and implements FMS-index, a simplification of the FM-index. It supports both streaming and single queries. The functionality implemented in FMSI is based on the following papers:
 
 The memory consumption for FMSI are (w/o kLCP which is additional 1bit/superstring char):
-- Queries: 2.41 bits / canonical 31-mer with human genome; ~3 bits / canonical 31-mer for _E. coli_ pangenome; ~7 bits / canonical 31-mer for _SARS-CoV-2_
-- Construction: 46MB for human genome
+- Queries: 2.41 bits / canonical 31-mer with human genome; ~3 bits / canonical 31-mer for _E. coli_ pangenome (1.17G k-mers from 89k genome); ~7 bits / canonical 31-mer for _SARS-CoV-2_
+- Construction: 46 GB for human genome
 
 [1] Ondřej Sladký, Pavel Veselý, and Karel Břinda: FroM Superstring to Indexing: a space-efficient index for unconstrained *k*-mer sets using the Masked Burrows-Wheeler Transform (MBWT).
 *bioRxiv* 2024.10.30.621029; [doi: 10.1101/2024.10.30.621029](https://doi.org/10.1101/2024.10.30.621029).
