@@ -100,6 +100,11 @@ export PATH="$PATH:$(pwd)"
    fmsi query -p ms.fa -q query.fa -k 31 -O
    ```
 
+#### Output format
+
+For each line of queries, FMSI outputs one bitstring, where 1 corresponds to a present *k*-mer and 0 corresponds to not present *k*-mer.
+Invalid *k*-mers, i.e., those that contain non-ACGT characters are also indicated with 0s.
+
 #### Specific-case usage
 
 If you do not need support for streaming queries, use the `-s` flag when querying for additional memory savings.

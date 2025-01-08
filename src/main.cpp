@@ -325,9 +325,6 @@ int ms_query(int argc, char *argv[]) {
 
   gzFile fp = OpenFile(query_fn);
   kseq_t *seq = kseq_init(fp);
-  size_t total_kmers = 0;
-  size_t valid_kmers = 0;
-  size_t found_kmers = 0;
   int64_t sequence_length = 0;
 
   std::cin.tie(&std::cout);
@@ -337,24 +334,18 @@ int ms_query(int argc, char *argv[]) {
     int64_t max_sequence_chunk_length = 400;
     max_sequence_chunk_length = k + std::max((int64_t)10, std::min(max_sequence_chunk_length, 2*(int64_t)std::sqrt(sequence_length)));
 
-    size_t current_kmers = std::max(int64_t(0), sequence_length - k + 1);
-    size_t current_valid_kmers = 0;
-    size_t current_found_kmers = 0;
     auto sequence = seq->seq.s;
     while (sequence_length > 0) {
         int64_t current_length = next_invalid_character_or_end(sequence, sequence_length);
-        if (current_length >= k) {
-            current_valid_kmers += current_length - k + 1;
-        }
+        
         while (current_length >= k) {
             int64_t chunk_length = std::min(current_length, max_sequence_chunk_length);
             if (f_name == "or") {
-                current_found_kmers += query_kmers<query_mode::orr>(index, sequence, chunk_length, k, has_klcp);
+                query_kmers<query_mode::orr>(index, sequence, chunk_length, k, has_klcp, std::cout);
             } else if (f_name == "all") {
-                current_found_kmers += query_kmers<query_mode::all>(index, sequence, chunk_length, k, has_klcp);
+                query_kmers<query_mode::all>(index, sequence, chunk_length, k, has_klcp, std::cout);
             } else {
-                current_found_kmers += query_kmers<query_mode::general>(index, sequence, chunk_length, k,
-                                                                        has_klcp, f);
+                query_kmers<query_mode::general>(index, sequence, chunk_length, k, has_klcp, std::cout, f);
             }
             sequence += chunk_length - k + 1;
             current_length -= chunk_length - k + 1;
@@ -363,20 +354,17 @@ int ms_query(int argc, char *argv[]) {
         // Skip also the next character.
         sequence_length -= current_length + 1;
         sequence += current_length + 1;
+        // Print 0 on invalid k-mers.
+        if (sequence_length >= 0) {
+          for (int64_t i = 0; i < std::min((int64_t) k, current_length + 1); ++i) {
+            std::cout << "0";
+          }
+        }
     }
+    std::cout << "\n";
     if (flush) {
-        std::cout << current_kmers << "," << current_valid_kmers << "," << current_found_kmers << std::endl;
+        std::cout.flush();
     }
-    total_kmers += current_kmers;
-    valid_kmers += current_valid_kmers;
-    found_kmers += current_found_kmers;
-  }
-  if (!flush) {
-      std::cout << "Total k-mers: " << total_kmers <<  " (k=" << k << ")" << std::endl;
-        std::cout << "Valid k-mers: " << valid_kmers << " (" << 100.0 * valid_kmers / total_kmers << "% of total k-mers)"
-                    << std::endl;
-      std::cout << "Found k-mers: " << found_kmers << " (" << 100.0 * found_kmers / valid_kmers << "% of valid k-mers)"
-                << std::endl;
   }
   return 0;
 }

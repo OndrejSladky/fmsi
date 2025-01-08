@@ -9,6 +9,7 @@
 #include "QSufSort.h"
 #include "functions.h"
 #include "kmers.h"
+#include <iostream>
 
 typedef unsigned char byte;
 
@@ -157,7 +158,7 @@ std::pair<size_t, size_t> single_query_general(fms_index& index, char* pattern, 
 }
 
 template <bool maximized_ones = false>
-size_t query_kmers_streaming(fms_index& index, char* sequence, char* rc_sequence, size_t sequence_length, int k) {
+void query_kmers_streaming(fms_index& index, char* sequence, char* rc_sequence, size_t sequence_length, int k, std::ostream& of) {
     std::vector<signed char> result (sequence_length - k + 1, -1);
     // Use saturating counter to ensure that RC strings are visited as forward strings.
     bool should_swap = index.predictor.predict_swap();
@@ -202,7 +203,14 @@ size_t query_kmers_streaming(fms_index& index, char* sequence, char* rc_sequence
         std::swap(forward_predictor_result, backward_predictor_result);
     }
     index.predictor.log_result(forward_predictor_result, backward_predictor_result);
-    return std::count(result.begin(), result.end(), 1);
+    
+    for (auto c: result) {
+        if (c==1) {
+            of << "1";
+        } else {
+            of << "0";
+        }
+    }
 }
 
 enum class query_mode {
@@ -211,9 +219,9 @@ enum class query_mode {
     general,
 };
 
+/// For each k-mer output 1 if it is found and 0 otherwise to the [of] stream.
 template <query_mode mode>
-size_t query_kmers_single(fms_index& index, char* sequence, char* rc_sequence, size_t sequence_length, int k, demasking_function_t f) {
-    size_t result = 0;
+void query_kmers_single(fms_index& index, char* sequence, char* rc_sequence, size_t sequence_length, int k, std::ostream& of, demasking_function_t f) {
     for (size_t i = 0; i <= sequence_length - k; ++i) {
         char *kmer = sequence + i;
         char *rc_kmer = rc_sequence + (sequence_length - k - i);
@@ -241,7 +249,15 @@ size_t query_kmers_single(fms_index& index, char* sequence, char* rc_sequence, s
                     backward_predictor_result = got;
                 }
             }
-            result += got == 1;
+            
+            
+            if (got == 1) {
+                of << "1";
+            } else {
+                of << "0";
+            }
+
+            // Update strand predictor.
             if (should_swap) {
                 std::swap(forward_predictor_result, backward_predictor_result);
             }
@@ -255,24 +271,23 @@ size_t query_kmers_single(fms_index& index, char* sequence, char* rc_sequence, s
                 total += total_rev;
             }
             if (f(ones, total)) {
-                ++result;
+                of << "1";
+            } else {
+                of << "0";
             }
         }
     }
-    return result;
 }
 
 template <query_mode mode>
-size_t query_kmers(fms_index& index, char* sequence, size_t sequence_length, int k, bool has_klcp, demasking_function_t f = nullptr) {
+void query_kmers(fms_index& index, char* sequence, size_t sequence_length, int k, bool has_klcp, std::ostream& of, demasking_function_t f = nullptr) {
     char *rc_sequence = ReverseComplementString(sequence, sequence_length);
-    size_t ret = 0;
     if (has_klcp && mode != query_mode::general) {
-        ret = query_kmers_streaming<mode==query_mode::all>(index, sequence, rc_sequence, sequence_length, k);
+        query_kmers_streaming<mode==query_mode::all>(index, sequence, rc_sequence, sequence_length, k, of);
     } else {
-        ret = query_kmers_single<mode>(index, sequence, rc_sequence, sequence_length, k, f);
+        query_kmers_single<mode>(index, sequence, rc_sequence, sequence_length, k, of, f);
     }
     delete[] rc_sequence;
-    return ret;
 }
 
 
