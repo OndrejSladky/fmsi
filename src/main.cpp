@@ -111,6 +111,7 @@ static int usage_query() {
             << std::endl;
   std::cerr << "  -k INT  - Size of k-mers, check with the index k [recommended]"
             << std::endl;
+  std::cerr << "  -H      - Output unique id's for found k-mers (and -1 for missing) instead of 1/0 bitmask." << std::endl;
   std::cerr << "  -s      - Do not use the kLCP array - saves memory but slows down streaming queries" << std::endl;
   std::cerr << "  -O      - Use speed optimizations, use whenever possible." << std::endl;
   std::cerr << "            Do not use if mask not maximizing the number of ones - leads to incorrect results." << std::endl;
