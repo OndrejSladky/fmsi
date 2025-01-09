@@ -150,6 +150,7 @@ inline int64_t kmer_order_if_present(const fms_index& index, size_t sa_start, si
     if (infer_presence<false>(index, sa_start, sa_end)) {
         return kmer_order(index, sa_start);
     } else {
+        std::cout << "badumts";
         return -1;
     }
 }

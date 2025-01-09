@@ -112,7 +112,7 @@ If you do not need support for streaming queries, use the `-s` flag when queryin
 If your mask superstring does not maximizes the number of ones in the mask, omit the `-O` optimization flag for query as otherwise you might get incorrect results.
 We, however, recommend to optimize the mask using `kmercamel optimize`.
 
-### k-mer minimum perfect hash function
+### k-mer lookup queries (stable)
 
 1. Compute a default masked superstring for all k-mers from a given FASTA file by [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel).
    ```

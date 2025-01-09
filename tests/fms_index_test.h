@@ -1,5 +1,7 @@
 #pragma once
 
+#include <sstream>
+
 #include "../src/fms_index.h"
 
 #include "gtest/gtest.h"
@@ -13,9 +15,11 @@ namespace {
                 sdsl::rank_support_v5<1>(),
                 sdsl::bit_vector({0,1,0,0}),
                 sdsl::rank_support_v5<1>(),
-                sdsl::rrr_vector<>({0, 0, 0, 1, 0, 1, 1, 1}),
+                sdsl::rrr_vector<255>({0, 0, 0, 1, 0, 1, 1, 1}),
+                sdsl::rank_support_rrr<1, 255>(),
                 std::vector<size_t>({1, 3, 4, 7}),
-                3
+                3,
+                sdsl::bit_vector({}),
         };
         ret.ac_gt_rank.set_vector(&ret.ac_gt);
         ret.ac_rank.set_vector(&ret.ac);
@@ -30,9 +34,11 @@ namespace {
                 sdsl::rank_support_v5<1>(),
                 sdsl::bit_vector({0,1,0,1,0}),
                 sdsl::rank_support_v5<1>(),
-                sdsl::rrr_vector<>({0,0,1,0,0,1,1,0,0}),
+                sdsl::rrr_vector<255>({0,0,1,0,0,1,1,0,0}),
+                sdsl::rank_support_rrr<1, 255>(),
                 std::vector<size_t>({1, 4, 4, 7}),
-                5
+                5,
+                sdsl::bit_vector({}),
         };
         ret.ac_gt_rank.set_vector(&ret.ac_gt);
         ret.ac_rank.set_vector(&ret.ac);
@@ -47,7 +53,8 @@ namespace {
                 sdsl::rank_support_v5<1>(),
                 sdsl::bit_vector({1}),
                 sdsl::rank_support_v5<1>(),
-                sdsl::rrr_vector<>({0,1,0,0,1,1,1,0}),
+                sdsl::rrr_vector<255>({0,1,0,0,1,1,1,0}),
+                sdsl::rank_support_rrr<1, 255>(),
                 std::vector<size_t>({1, 4, 7, 7}),
                 5,
                 sdsl::bit_vector({0, 1, 0, 0, 1, 1, 0, 0}),
@@ -191,25 +198,25 @@ namespace {
             std::string query;
             int k;
             bool maximize_ones;
-            size_t want_result;
+            std::string want_result;
         };
         std::vector<test_case> tests = {
-                {"CACATACA",3, false, 4},
-                {"TGTATGTG",3, false, 4},
-                {"CACATTGT",3, false, 4},
-                {"CACATACA",3, true, 4}, // Assumes the first line ne is always selected to infer.
+                {"CACATACA",3, false, "111001"},
+                {"TGTATGTG",3, false, "100111"},
+                {"CACATTGT",3, false, "111001"},
+                {"CACATACA",3, true,  "111001"}, // Assumes the first line is always selected to infer.
         };
         for (auto t: tests) {
             auto sequence = (char*) t.query.data();
             auto rc = ReverseComplementString(t.query.data(), t.query.length());
-            size_t got_result;
+            std::stringstream got_result;
 
             if (t.maximize_ones)
-                got_result = query_kmers_streaming<true>(index, sequence, rc, t.query.length(), t.k);
+                query_kmers_streaming<true>(index, sequence, rc, t.query.length(), t.k, false, got_result);
             else
-                got_result = query_kmers_streaming<false>(index, sequence, rc, t.query.length(), t.k);
+                query_kmers_streaming<false>(index, sequence, rc, t.query.length(), t.k, false, got_result);
 
-            EXPECT_EQ(got_result, t.want_result);
+            EXPECT_EQ(got_result.str(), t.want_result);
         }
     }
 
@@ -217,23 +224,25 @@ namespace {
         auto index = get_dummy_index();
         struct test_case {
             std::string query;
-            bool want_result;
+            std::string want_result;
         };
         std::vector<test_case> tests = {
-                {"A", true},
-                {"AG", false},
-                {"CA", true},
-                {"GGTA", true},
-                {"ATGG", false},
-                {"GA", false},
-                {"GGG", false},
-                {"CC", true},
+                {"A", "1"},
+                {"AG", "0"},
+                {"CA", "1"},
+                {"GGTA", "1"},
+                {"ATGG", "0"},
+                {"GA", "0"},
+                {"GGG", "0"},
+                {"CC", "1"},
         };
 
         for (auto t: tests) {
-            auto got_result = query_kmers<query_mode::orr>(index, t.query.data(), t.query.length(), t.query.size(), false );
+            std::stringstream got_result;
+            
+            query_kmers<query_mode::orr>(index, t.query.data(), t.query.length(), t.query.size(), false, got_result, false);
 
-            EXPECT_EQ(got_result, t.want_result);
+            EXPECT_EQ(got_result.str(), t.want_result);
         }
     }
 
@@ -241,19 +250,21 @@ namespace {
         auto index = get_dummy_index2();
         struct test_case {
             std::string query;
-            bool want_result;
+            std::string want_result;
         };
         std::vector<test_case> tests = {
-                {"AAGA", true},
-                {"AAGAA", false},
-                {"GGTTAAGA", true},
-                {"GTTAAGA", true},
+                {"AAGA", "1"},
+                {"AAGAA", "0"},
+                {"GGTTAAGA", "1"},
+                {"GTTAAGA", "1"},
         };
 
         for (auto t: tests) {
-            auto got_result = query_kmers<query_mode::orr>(index, t.query.data(), t.query.length(), t.query.size(), false);
+            std::stringstream got_result;
 
-            EXPECT_EQ(got_result, t.want_result);
+            query_kmers<query_mode::orr>(index, t.query.data(), t.query.length(), t.query.size(), false, got_result, false);
+
+            EXPECT_EQ(got_result.str(), t.want_result);
         }
     }
 
