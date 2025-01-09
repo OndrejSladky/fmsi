@@ -82,7 +82,7 @@ export PATH="$PATH:$(pwd)"
 
 ## Usage
 
-### k-mer queries (stable)
+### k-mer membership queries queries (stable)
 
 1. Compute an optimized masked superstring for all k-mers from a given FASTA file by [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel).
    ```
@@ -111,6 +111,24 @@ If you do not need support for streaming queries, use the `-s` flag when queryin
 
 If your mask superstring does not maximizes the number of ones in the mask, omit the `-O` optimization flag for query as otherwise you might get incorrect results.
 We, however, recommend to optimize the mask using `kmercamel optimize`.
+
+### k-mer minimum perfect hash function
+
+1. Compute a default masked superstring for all k-mers from a given FASTA file by [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel).
+   ```
+   kmercamel -p input_file.fa -k 31 -c -o ms.fa
+   ```
+
+2. Create an FMS index from the masked superstring:
+   ```
+   fmsi index -p ms.fa -k 31
+   ```
+
+3. Query the index from a given query FASTA file with k-mers:
+   ```
+   fmsi query -p ms.fa -q query.fa -k 31 -H
+   ```
+
 
 ### k-mer set operations (experimental)
 

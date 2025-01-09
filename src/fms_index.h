@@ -6,6 +6,7 @@
 #include <sdsl/bit_vectors.hpp>
 #include <sdsl/rank_support_v5.hpp>
 #include <sdsl/rank_support_v.hpp>
+#include <sdsl/rank_support.hpp>
 #include "QSufSort.h"
 #include "functions.h"
 #include "kmers.h"
@@ -54,7 +55,8 @@ struct fms_index {
     sdsl::rank_support_v5<1> ac_rank;
     sdsl::bit_vector gt;
     sdsl::rank_support_v5<1> gt_rank;
-    sdsl::rrr_vector<> sa_transformed_mask;
+    sdsl::rrr_vector<255> sa_transformed_mask;
+    sdsl::rank_support_rrr<1, 255> mask_rank;
     std::vector<size_t> counts;
     size_t dollar_position;
     sdsl::bit_vector klcp;
@@ -140,11 +142,29 @@ inline int infer_presence(const fms_index& index, size_t sa_start, size_t sa_end
     }
 }
 
+inline int64_t kmer_order(const fms_index& index, size_t sa_start) {
+    return index.mask_rank(sa_start);
+}
+
+inline int64_t kmer_order_if_present(const fms_index& index, size_t sa_start, size_t sa_end) {
+    if (infer_presence<false>(index, sa_start, sa_end)) {
+        return kmer_order(index, sa_start);
+    } else {
+        return -1;
+    }
+}
+
 template <bool maximized_ones=false>
 int single_query_or(fms_index& index, char* pattern, int k) {
     size_t sa_start = -1, sa_end = -1;
     get_range_with_pattern(index, sa_start, sa_end, pattern, k);
     return infer_presence<maximized_ones>(index, sa_start, sa_end);
+}
+
+int64_t single_query_order(fms_index& index, char* pattern, int k) {
+    size_t sa_start = -1, sa_end = -1;
+    get_range_with_pattern(index, sa_start, sa_end, pattern, k);
+    return kmer_order_if_present(index, sa_start, sa_end);
 }
 
 std::pair<size_t, size_t> single_query_general(fms_index& index, char* pattern, int k) {
@@ -158,8 +178,8 @@ std::pair<size_t, size_t> single_query_general(fms_index& index, char* pattern, 
 }
 
 template <bool maximized_ones = false>
-void query_kmers_streaming(fms_index& index, char* sequence, char* rc_sequence, size_t sequence_length, int k, std::ostream& of) {
-    std::vector<signed char> result (sequence_length - k + 1, -1);
+void query_kmers_streaming(fms_index& index, char* sequence, char* rc_sequence, size_t sequence_length, int k, bool output_orders, std::ostream& of) {
+    std::vector<int64_t> result (sequence_length - k + 1, -1);
     // Use saturating counter to ensure that RC strings are visited as forward strings.
     bool should_swap = index.predictor.predict_swap();
     if (should_swap) {
@@ -176,13 +196,19 @@ void query_kmers_streaming(fms_index& index, char* sequence, char* rc_sequence, 
             extend_range_with_klcp(index, sa_start, sa_end);
             update_range(index, sa_start, sa_end, nucleotideToInt[(uint8_t)sequence[i_back]]);
         }
-        result[i_back] = infer_presence<maximized_ones>(index, sa_start, sa_end);
-        forward_predictor_result += result[i_back];
+        if (output_orders) {
+            result[i_back] = kmer_order_if_present(index, sa_start, sa_end);
+            if (result[i_back] >= 0) forward_predictor_result++;
+            else forward_predictor_result--;
+        } else {
+            result[i_back] = infer_presence<maximized_ones>(index, sa_start, sa_end);
+            forward_predictor_result += result[i_back];
+        }
     }
     // Search on the reverse strand.
     sa_start = sa_end = -1;
     for (size_t i = 0; i <= sequence_length - k; ++i) {
-        if (result[i] == 1 || (result[i] == 0 && maximized_ones)) {
+        if ((result[i] >= 0 && output_orders) || result[i] == 1 || (result[i] == 0 && maximized_ones)) {
             // This position can be skipped for performance.
             sa_start = sa_end = -1;
             continue;
@@ -194,9 +220,16 @@ void query_kmers_streaming(fms_index& index, char* sequence, char* rc_sequence, 
             extend_range_with_klcp(index, sa_start, sa_end);
             update_range(index, sa_start, sa_end, nucleotideToInt[(uint8_t)rc_sequence[i_back]]);
         }
-        signed char res = infer_presence<maximized_ones>(index, sa_start, sa_end);
+        int64_t res;
+        if (output_orders) {
+            res = kmer_order_if_present(index, sa_start, sa_end);
+            if (res >= 0) backward_predictor_result ++;
+            else backward_predictor_result--;
+        } else {
+            res = infer_presence<maximized_ones>(index, sa_start, sa_end);
+            backward_predictor_result += res;
+        }
         result[i] = std::max(result[i], res);
-        backward_predictor_result += res;
     }
     // Log the results to the saturating counter for better future performance.
     if (should_swap) {
@@ -204,8 +237,13 @@ void query_kmers_streaming(fms_index& index, char* sequence, char* rc_sequence, 
     }
     index.predictor.log_result(forward_predictor_result, backward_predictor_result);
     
-    for (auto c: result) {
-        if (c==1) {
+    for (size_t i = 0; i < result.size(); ++i) {
+        int64_t c = result[i];
+        if (output_orders) {
+            if (i > 0) of << ",";
+            of << c;
+        }
+        else if (c==1) {
             of << "1";
         } else {
             of << "0";
@@ -221,7 +259,7 @@ enum class query_mode {
 
 /// For each k-mer output 1 if it is found and 0 otherwise to the [of] stream.
 template <query_mode mode>
-void query_kmers_single(fms_index& index, char* sequence, char* rc_sequence, size_t sequence_length, int k, std::ostream& of, demasking_function_t f) {
+void query_kmers_single(fms_index& index, char* sequence, char* rc_sequence, size_t sequence_length, int k, std::ostream& of, bool output_orders, demasking_function_t f) {
     for (size_t i = 0; i <= sequence_length - k; ++i) {
         char *kmer = sequence + i;
         char *rc_kmer = rc_sequence + (sequence_length - k - i);
@@ -231,14 +269,22 @@ void query_kmers_single(fms_index& index, char* sequence, char* rc_sequence, siz
         }
         int forward_predictor_result = 0, backward_predictor_result = 0;
         if constexpr (mode != query_mode::general) {
-            int got;
-            if constexpr (mode == query_mode::orr) {
+            int64_t got;
+            if (output_orders) {
+                got = single_query_order(index, kmer, k);
+            } if constexpr (mode == query_mode::orr) {
                 got = single_query_or<false>(index, kmer, k);
             } else {
                 got = single_query_or<true>(index, kmer, k);
             }
             forward_predictor_result = got;
-            if constexpr (mode == query_mode::orr) {
+            if (output_orders) {
+                if (forward_predictor_result >= 0) forward_predictor_result = 1;
+                else {
+                    got = single_query_order(index, rc_kmer, k);
+                    backward_predictor_result = got >= 0 ? 1 : -1;
+                }
+            } if constexpr (mode == query_mode::orr) {
                 if (got != 1) {
                     got = single_query_or<false>(index,rc_kmer , k);
                     backward_predictor_result = got;
@@ -250,8 +296,11 @@ void query_kmers_single(fms_index& index, char* sequence, char* rc_sequence, siz
                 }
             }
             
-            
-            if (got == 1) {
+            if (output_orders) {
+                if (i > 0) of << ",";
+                of << got;
+            }
+            else if (got == 1) {
                 of << "1";
             } else {
                 of << "0";
@@ -280,12 +329,12 @@ void query_kmers_single(fms_index& index, char* sequence, char* rc_sequence, siz
 }
 
 template <query_mode mode>
-void query_kmers(fms_index& index, char* sequence, size_t sequence_length, int k, bool has_klcp, std::ostream& of, demasking_function_t f = nullptr) {
+void query_kmers(fms_index& index, char* sequence, size_t sequence_length, int k, bool has_klcp, std::ostream& of, bool output_orders, demasking_function_t f = nullptr) {
     char *rc_sequence = ReverseComplementString(sequence, sequence_length);
     if (has_klcp && mode != query_mode::general) {
-        query_kmers_streaming<mode==query_mode::all>(index, sequence, rc_sequence, sequence_length, k, of);
+        query_kmers_streaming<mode==query_mode::all>(index, sequence, rc_sequence, sequence_length, k, output_orders, of);
     } else {
-        query_kmers_single<mode>(index, sequence, rc_sequence, sequence_length, k, of, f);
+        query_kmers_single<mode>(index, sequence, rc_sequence, sequence_length, k, of, output_orders, f);
     }
     delete[] rc_sequence;
 }
@@ -370,7 +419,7 @@ fms_index construct(std::string &ms, int k, bool use_klcp) {
         }
     }
     delete[] sa;
-    index.sa_transformed_mask = sdsl::rrr_vector<>(sa_transformed_mask);
+    index.sa_transformed_mask = sdsl::rrr_vector<255>(sa_transformed_mask);
     sa_transformed_mask.resize(0);
 
     index.ac_gt = sdsl::bit_vector(bwt.size());
@@ -401,6 +450,7 @@ fms_index construct(std::string &ms, int k, bool use_klcp) {
     index.ac_gt_rank = sdsl::rank_support_v5<1>(&index.ac_gt);
     index.ac_rank = sdsl::rank_support_v5<1>(&index.ac);
     index.gt_rank = sdsl::rank_support_v5<1>(&index.gt);
+    index.mask_rank = sdsl::rank_support_rrr<1, 255>(&index.sa_transformed_mask);
 
     index.k = k;
 
@@ -457,6 +507,7 @@ fms_index load_index(const std::string &fn, bool use_klcp = true) {
     sdsl::load_from_file(index.gt, basename + ".gt");
     index.gt_rank = sdsl::rank_support_v5<1>(&index.gt);
     sdsl::load_from_file(index.sa_transformed_mask, basename + ".mask");
+    index.mask_rank = sdsl::rank_support_rrr<1, 255>(&index.sa_transformed_mask);
     if (std::filesystem::exists(basename + ".klcp") && use_klcp) {
         sdsl::load_from_file(index.klcp, basename + ".klcp");
     }

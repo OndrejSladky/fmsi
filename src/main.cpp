@@ -246,6 +246,7 @@ int ms_index(int argc, char *argv[]) {
 
 int ms_query(int argc, char *argv[]) {
   bool usage = false;
+  bool output_orders = false;
   int c;
   int k = 0;
   std::string fn;
@@ -254,7 +255,7 @@ int ms_query(int argc, char *argv[]) {
   std::function<bool(size_t, size_t)> f = mask_function("or");
   bool flush = false;
   bool has_klcp = true;
-  while ((c = getopt(argc, argv, "p:f:hq:k:FOs")) >= 0) {
+  while ((c = getopt(argc, argv, "p:f:hq:k:FOsH")) >= 0) {
     switch (c) {
     case 'f':
       try {
@@ -291,6 +292,9 @@ int ms_query(int argc, char *argv[]) {
     case 'F':
       flush = true;
       break;
+    case 'H':
+      output_orders = true;
+      break;
     default:
       return usage_query();
     }
@@ -300,6 +304,12 @@ int ms_query(int argc, char *argv[]) {
     return 0;
   } else if (fn.empty()) {
     std::cerr << "ERROR: Path to the fasta file is a required argument." << std::endl;
+    return usage_query();
+  }
+  if (output_orders && f_name == "all") {
+    std::cerr << "WARNING: The current version of FMSI has speed benefits only if output as (minimum) perfect hash function is not used. Additionally, if you desire minimum perfect hash function, please minimize the number of ones in the mask." << std::endl;
+  } else if (f_name != "or" && output_orders) {
+    std::cerr << "ERROR: FMSI as Minimum Perfect Hash Function is not allowed with f-masked superstrings in the current version." << std::endl;
     return usage_query();
   }
 
@@ -335,17 +345,20 @@ int ms_query(int argc, char *argv[]) {
     max_sequence_chunk_length = k + std::max((int64_t)10, std::min(max_sequence_chunk_length, 2*(int64_t)std::sqrt(sequence_length)));
 
     auto sequence = seq->seq.s;
+    bool output_comma = false;
     while (sequence_length > 0) {
         int64_t current_length = next_invalid_character_or_end(sequence, sequence_length);
         
         while (current_length >= k) {
+            if (output_orders && output_comma) std::cout << ",";
+            output_comma = true;
             int64_t chunk_length = std::min(current_length, max_sequence_chunk_length);
             if (f_name == "or") {
-                query_kmers<query_mode::orr>(index, sequence, chunk_length, k, has_klcp, std::cout);
+                query_kmers<query_mode::orr>(index, sequence, chunk_length, k, has_klcp, std::cout, output_orders);
             } else if (f_name == "all") {
-                query_kmers<query_mode::all>(index, sequence, chunk_length, k, has_klcp, std::cout);
+                query_kmers<query_mode::all>(index, sequence, chunk_length, k, has_klcp, std::cout, output_orders);
             } else {
-                query_kmers<query_mode::general>(index, sequence, chunk_length, k, has_klcp, std::cout, f);
+                query_kmers<query_mode::general>(index, sequence, chunk_length, k, has_klcp, std::cout, output_orders, f);
             }
             sequence += chunk_length - k + 1;
             current_length -= chunk_length - k + 1;
@@ -357,7 +370,14 @@ int ms_query(int argc, char *argv[]) {
         // Print 0 on invalid k-mers.
         if (sequence_length >= 0) {
           for (int64_t i = 0; i < std::min((int64_t) k, current_length + 1); ++i) {
-            std::cout << "0";
+            if (output_orders) {
+              if (output_comma) std::cout << ",";
+              output_comma = true;
+              std::cout << "-1";
+            }
+            else {
+              std::cout << "0";
+            }
           }
         }
     }
