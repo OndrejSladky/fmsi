@@ -131,26 +131,27 @@ inline int infer_presence(const fms_index& index, size_t sa_start, size_t sa_end
     } else {
         for (size_t i = sa_start; i < sa_end; ++i) {
             if (index.sa_transformed_mask[i]) {
-                return true;
+                return 1;
             }
         }
         if (sa_start == sa_end) {
             return -1;
         } else {
-            return false;
+            return 0;
         }
     }
 }
 
 inline int64_t kmer_order(const fms_index& index, size_t sa_start) {
+    std::cout << index.mask_rank(sa_start) << std::endl;
     return index.mask_rank(sa_start);
 }
 
 inline int64_t kmer_order_if_present(const fms_index& index, size_t sa_start, size_t sa_end) {
-    if (infer_presence<false>(index, sa_start, sa_end)) {
+    std::cout << sa_start << " " << sa_end << std::endl;
+    if (infer_presence<false>(index, sa_start, sa_end) == 1) {
         return kmer_order(index, sa_start);
     } else {
-        std::cout << "badumts";
         return -1;
     }
 }
@@ -234,6 +235,7 @@ void query_kmers_streaming(fms_index& index, char* sequence, char* rc_sequence, 
     }
     // Log the results to the saturating counter for better future performance.
     if (should_swap) {
+        std::reverse(result.begin(), result.end());
         std::swap(forward_predictor_result, backward_predictor_result);
     }
     index.predictor.log_result(forward_predictor_result, backward_predictor_result);

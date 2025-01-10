@@ -42,29 +42,21 @@ def run_fmsi_index(file):
 def create_fmsi_process(file, k, optimize):
     return subprocess.Popen([fmsi_path, 'query', '-p', file, '-q', '-', '-k', str(k), '-F'] + (['-O'] if optimize else []), stdout=subprocess.PIPE, stdin=subprocess.PIPE)
 
-def get_total_kmers(sequence, k):
-    return len(sequence) - k + 1
-
-def get_valid_kmers(sequence, k):
-    return sum(all(c in "ACGT" for c in sequence[i:i+k]) for i in range(len(sequence) - k + 1))
-
-def get_positive_kmers(sequence, superstring, mask, k):
-    return sum(f_or(lmbda(superstring, mask, sequence[i:i+k])) for i in range(len(sequence) - k + 1))
+def get_kmer_presence_map(sequence, superstring, mask, k):
+    return "".join([str(int(f_or(lmbda(superstring, mask, sequence[i:i+k])))) for i in range(len(sequence) - k + 1)])
 
 
 def assert_correct_results(process, superstring, mask, kmers, k: int):
     results = []
-    for i, kmer in enumerate(kmers):
-        process.stdin.write(f">\n{kmer}\n".encode())
-        results.append([get_total_kmers(kmer, k), get_valid_kmers(kmer, k), get_positive_kmers(kmer, superstring, mask, k)])
+    for seq in kmers:
+        process.stdin.write(f">\n{seq}\n".encode())
+        results.append(get_kmer_presence_map(seq, superstring, mask, k))
     process.stdin.close()
     index = 0
     for line in process.stdout:
-        total_count, valid_count, positive_count = results[index]
-        total_kmers, valid_kmers, found_kmers = map(int, line.decode().strip().split(","))
-        assert total_count == total_kmers, f"Expected {total_kmers} kmers, got {total_count}"
-        assert valid_count == valid_kmers, f"Expected {valid_kmers} valid kmers, got {valid_count}"
-        assert positive_count == found_kmers, f"Expected {found_kmers} positive kmers, got {positive_count}"
+        expected = results[index]
+        got = line.decode().strip()
+        assert expected == got, f"Expected '{expected}' as output, got '{got}'"
         print(".", end="")
         if (index + 1) % 50 == 0:
             print()
