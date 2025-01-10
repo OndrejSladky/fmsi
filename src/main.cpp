@@ -35,14 +35,11 @@ static int usage() {
 
 static int usage_index() {
   std::cerr << std::endl;
-  std::cerr << "Usage:   fmsi index [options]" << std::endl << std::endl;
+  std::cerr << "Usage:   fmsi index [options] <masked-superstring-input>" << std::endl << std::endl;
   std::cerr << "Options:" << std::endl;
-  std::cerr << "    -p FILE - path to masked "
-               "superstring [required]"
-            << std::endl;
   std::cerr << "    -k INT  - size of k-mers [recommended, default: number of mask trailing zeros - 1]"
             << std::endl;
-  std::cerr << "    -s      - do not compute the kLCP array used for faster streaming queries."
+  std::cerr << "    -x      - do not compute the kLCP array used for faster streaming queries."
             << std::endl << std::endl;
   std::cerr << "Note: `fmsi index` accepts only masked superstrings - these can be computed e.g. by KmerCamel from any FASTA file." << std::endl << std::endl;
   return 1;
@@ -97,25 +94,22 @@ void usage_functions() {
   std::cerr << "    xor     - represented when an odd number "
                "of ON occurrences"
             << std::endl;
-  std::cerr << "    INT-INT - represneted when in the bounds"
+  std::cerr << "    INT-INT - represented when in the bounds"
             << std::endl;
 }
 
 static int usage_query() {
   std::cerr << std::endl;
-  std::cerr << "Usage:   fmsi query [options]" << std::endl << std::endl;
+  std::cerr << "Usage:   fmsi query [options] <index-prefix>" << std::endl << std::endl;
   std::cerr << "Options (stable):" << std::endl;
-  std::cerr << "  -p FILE - Index prefix (masked superstring file) [required]"
-            << std::endl;
   std::cerr << "  -q FILE - Path to FASTA/FASTQ with queries [default: stdin]"
             << std::endl;
-  std::cerr << "  -k INT  - Size of k-mers, check with the index k [recommended]"
+  std::cerr << "  -k INT  - Size of k-mers [default: infer automatically from index]"
             << std::endl;
-  std::cerr << "  -H      - Output unique id's for found k-mers (and -1 for missing) instead of 1/0 bitmask." << std::endl;
-  std::cerr << "  -s      - Do not use the kLCP array - saves memory but slows down streaming queries" << std::endl;
-  std::cerr << "  -O      - Use speed optimizations, use whenever possible." << std::endl;
-  std::cerr << "            Do not use if mask not maximizing the number of ones - leads to incorrect results." << std::endl;
-  std::cerr << "  -F      - Print the results per each entry in the query file." << std::endl << std::endl;
+  std::cerr << "  -H      - Output k-mer hashes for found k-mers (and -1 for missing) instead of bitmask." << std::endl;
+  std::cerr << "  -S      - Use kLCP array for streamed queries (increses memory consumption)" << std::endl;
+  std::cerr << "  -O      - FMSI uses properties of max-one masked superstrings to speed up queries" << std::endl;
+  std::cerr << "            Use only if a masked superstring with maximum number of ones is indexed." << std::endl;
   std::cerr << "Parameters (experimental, using f-MS framework):" << std::endl;
   usage_functions();
   std::cerr << std::endl;
@@ -124,16 +118,10 @@ static int usage_query() {
 
 static int usage_normalize() {
   std::cerr << std::endl << 
-      "Usage:   fmsi compact [options]"
+      "Usage:   fmsi compact [options] <index-prefix>"
       << std::endl << std::endl;
   std::cerr << std::endl << "Options (all experimental):" << std::endl;
-  std::cerr << "   `-p path_to_ms` - The path to the fasta file with masked "
-               "superstring that is indexed. Required."
-            << std::endl;
   std::cerr << std::endl << "The recognized arguments are:" << std::endl;
-  std::cerr << "    `-p path_to_fasta` - The path to the fasta file from which "
-               "the index was created. Required."
-            << std::endl;
   std::cerr << "    `-k value_of_k` - The size of queried k-mers."
             << std::endl;
   std::cerr << "    `-s` - Only print the compacted masked superstring and do not "
@@ -146,22 +134,15 @@ static int usage_normalize() {
 
 static int usage_export() {
   std::cerr << std::endl << 
-      "Usage:   fmsi export [options]"
+      "Usage:   fmsi export <index-prefix>"
       << std::endl << std::endl;
-  std::cerr << std::endl << "Options:" << std::endl;
-  std::cerr << "  -p FILE - Index prefix (masked superstring file) [required]"
-            << std::endl << std::endl;
     return 1;
 }
 
 static int usage_clean() {
   std::cerr << std::endl << 
-      "Usage:   fmsi clean [options]"
-      << std::endl << std::endl;
-  std::cerr << std::endl << "Options:" << std::endl;
-  std::cerr << "  `-p path_to_fasta` - The path to the fasta file with masked "
-               "superstring that is indexed. Required."
-            << std::endl << std::endl;
+  "Usage:   fmsi clean <index-prefix>"
+  << std::endl << std::endl;
   return 1;
 }
 
@@ -174,29 +155,23 @@ int ms_index(int argc, char *argv[]) {
   int c;
   bool usage = false;
   std::string fn;
-  // For backwards compatibility.
-  bool l_param_set = false;
+
+  if (argc > 1 && std::string(argv[argc - 1]) != "-h") {
+    fn = argv[argc - 1];
+    argc--;
+  }
+
   int k = 0;
   bool no_streaming = false;
-  while ((c = getopt(argc, argv, "p:l:hk:s")) >= 0) {
+  while ((c = getopt(argc, argv, "hk:x")) >= 0) {
     switch (c) {
-    case 'l':
-      l_param_set = true;
-      break;
     case 'h':
       usage = true;
       break;
     case 'k':
       k = atoi(optarg);
       break;
-    case 'p':
-      if (fn != "") {
-        std::cerr << "ERROR: Parameter [-p] provided multiple times" << std::endl;
-        return usage_index();
-      }
-      fn = optarg;
-      break;
-    case 's':
+    case 'x':
       no_streaming = true;
       break;
     default:
@@ -207,11 +182,8 @@ int ms_index(int argc, char *argv[]) {
     usage_index();
     return 0;
   } else if (fn.empty()) {
-    std::cerr << "ERROR: Path to the masked superstring [-p] is a required argument." << std::endl;
+    std::cerr << "ERROR: Path to the masked superstring is a required argument." << std::endl;
     return usage_index();
-  }
-  if (l_param_set) {
-      std::cerr << "WARNING: Parameter -l is ignored." << std::endl;
   }
 
   std::cerr << "Starting " << fn << std::endl;
@@ -251,12 +223,17 @@ int ms_query(int argc, char *argv[]) {
   int c;
   int k = 0;
   std::string fn;
+
+  if (argc > 1 && std::string(argv[argc - 1]) != "-h") {
+    fn = argv[argc - 1];
+    argc--;
+  }
+
   std::string query_fn = "-";
   std::string f_name = "or";
   std::function<bool(size_t, size_t)> f = mask_function("or");
-  bool flush = false;
-  bool has_klcp = true;
-  while ((c = getopt(argc, argv, "p:f:hq:k:FOsH")) >= 0) {
+  bool has_klcp = false;
+  while ((c = getopt(argc, argv, "f:hq:k:OSH")) >= 0) {
     switch (c) {
     case 'f':
       try {
@@ -269,9 +246,6 @@ int ms_query(int argc, char *argv[]) {
       break;
     case 'h':
       usage = true;
-      break;
-    case 'p':
-      fn = optarg;
       break;
     case 'q':
       query_fn = optarg;
@@ -287,11 +261,8 @@ int ms_query(int argc, char *argv[]) {
             f = mask_function("all");
         }
         break;
-    case 's':
-      has_klcp = false;
-      break;
-    case 'F':
-      flush = true;
+    case 'S':
+      has_klcp = true;
       break;
     case 'H':
       output_orders = true;
@@ -345,6 +316,8 @@ int ms_query(int argc, char *argv[]) {
     int64_t max_sequence_chunk_length = 400;
     max_sequence_chunk_length = k + std::max((int64_t)10, std::min(max_sequence_chunk_length, 2*(int64_t)std::sqrt(sequence_length)));
 
+    std::cout << seq->name.s << "\t";
+
     auto sequence = seq->seq.s;
     bool output_comma = false;
     while (sequence_length > 0) {
@@ -383,9 +356,6 @@ int ms_query(int argc, char *argv[]) {
         }
     }
     std::cout << "\n";
-    if (flush) {
-        std::cout.flush();
-    }
   }
   return 0;
 }
@@ -457,12 +427,14 @@ int ms_normalize(int argc, char *argv[]) {
   int c;
   int k = 0;
   bool only_print = false;
-  // For backwards compatibility.
-  bool l_param_used = false;
-  bool d_param_used = false;
   std::string fn;
+  if (argc > 1 && std::string(argv[argc - 1]) != "-h") {
+    fn = argv[argc - 1];
+    argc--;
+  }
+
   std::function<bool(size_t, size_t)> f = mask_function("or", true);
-  while ((c = getopt(argc, argv, "p:hk:d:f:sl")) >= 0) {
+  while ((c = getopt(argc, argv, "hk:f:s")) >= 0) {
     switch (c) {
     case 'f':
       try {
@@ -481,14 +453,8 @@ int ms_normalize(int argc, char *argv[]) {
     case 'k':
       k = atoi(optarg);
       break;
-    case 'd':
-      d_param_used = true;
-      break;
     case 's':
       only_print = true;
-      break;
-    case 'l':
-        l_param_used = true;
       break;
     default:
       return usage_normalize();
@@ -502,12 +468,6 @@ int ms_normalize(int argc, char *argv[]) {
     std::cerr << "Path to the fasta file is a required argument." << std::endl;
     return usage_normalize();
   }
-    if (l_param_used) {
-        std::cerr << "WARNING: Parameter -l is ignored." << std::endl;
-    }
-    if (d_param_used) {
-        std::cerr << "WARNING: Parameter -d is ignored." << std::endl;
-    }
 
   std::cerr << "Starting " << fn << std::endl;
   fms_index index = load_index(fn);
@@ -535,13 +495,15 @@ int ms_export(int argc, char *argv[]) {
     bool usage = false;
     int c;
     std::string fn;
-    while ((c = getopt(argc, argv, "p:h")) >= 0) {
+    if (argc > 1 && std::string(argv[argc - 1]) != "-h") {
+      fn = argv[argc - 1];
+      argc--;
+    }
+
+    while ((c = getopt(argc, argv, "h")) >= 0) {
         switch (c) {
             case 'h':
                 usage = true;
-                break;
-            case 'p':
-                fn = optarg;
                 break;
             default:
                 return usage_export();
@@ -654,13 +616,15 @@ int ms_clean(int argc, char *argv[]) {
   bool usage = false;
   int c;
   std::string fn;
-  while ((c = getopt(argc, argv, "p:f:h")) >= 0) {
+  if (argc > 1 && std::string(argv[argc - 1]) != "-h") {
+    fn = argv[argc - 1];
+    argc--;
+  }
+
+  while ((c = getopt(argc, argv, "h")) >= 0) {
     switch (c) {
     case 'h':
       usage = true;
-      break;
-    case 'p':
-      fn = optarg;
       break;
     default:
       return usage_clean();
