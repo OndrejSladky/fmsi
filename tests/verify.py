@@ -65,6 +65,36 @@ def assert_correct_results(process, superstring, mask, kmers, k: int):
             print()
         index += 1
 
+
+def all_present_kmers(k, superstring, mask):
+    result = []
+    for i in range(superstring) - k + 1:
+        if mask[i] == '1':
+            result.append(f">header\n{superstring[i:i+k].upper()}")
+    return "\n".join(result) + "\n", len(result)
+
+
+def assert_correct_hashes(process, k, superstring, mask):
+    process_input, kmers = all_present_kmers(k, superstring, mask)
+    already_hashed = [False] * kmers
+    process.stdin.write(process_input.encode())
+    process.stdin.close()
+    index= 0
+    for line in process.stdout:
+        got = line.decode().strip().split('\t')
+        header = got[0]
+        hash_value = got[1]
+        assert header == "header", f"Unexpected line header {header}"
+        # Check surjectivity which on set of same size is equivalent to bijectivity.
+        assert 0 <= hash_value < kmers, f"Hash value {hash_value} out of range"
+        assert not already_hashed[hash_value], f"Duplicate hash value {hash_value}"
+        already_hashed[hash_value] = True
+        print(".", end="")
+        if (index + 1) % 50 == 0:
+            print()
+        index += 1
+
+
 def generate_random_kmers(k, superstring, num_queries):
     threshold = 0.5 * (len(superstring) > k)
     kmers = []
@@ -86,7 +116,12 @@ def main():
     parser.add_argument("--query_path", help="the path to the query file; if not specified, random queries are generated")
     parser.add_argument("--num_queries", type=int, help="the number of queries to generate if no query file is specified", default=1000)
     parser.add_argument("--optimize", type=bool, help="if queries should optimize for maximizing the number of ones in the mask", default=False)
+    parser.add_argument("--hashes", type=bool, help="check the minimum perfect hash functionality", default=False)
     args = parser.parse_args()
+
+    if args.hashes and (args.query_path or args.optimize):
+        print("Invalid combination of parameters")
+        exit(1)
 
     run_fmsi_index(args.path)
     superstring, mask = separate_mask_and_superstring(read_masked_superstring(args.path))
