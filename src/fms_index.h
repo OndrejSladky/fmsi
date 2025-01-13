@@ -143,12 +143,10 @@ inline int infer_presence(const fms_index& index, size_t sa_start, size_t sa_end
 }
 
 inline int64_t kmer_order(const fms_index& index, size_t sa_start) {
-    std::cout << index.mask_rank(sa_start) << std::endl;
     return index.mask_rank(sa_start);
 }
 
 inline int64_t kmer_order_if_present(const fms_index& index, size_t sa_start, size_t sa_end) {
-    std::cout << sa_start << " " << sa_end << std::endl;
     if (infer_presence<false>(index, sa_start, sa_end) == 1) {
         return kmer_order(index, sa_start);
     } else {
@@ -275,7 +273,7 @@ void query_kmers_single(fms_index& index, char* sequence, char* rc_sequence, siz
             int64_t got;
             if (output_orders) {
                 got = single_query_order(index, kmer, k);
-            } if constexpr (mode == query_mode::orr) {
+            } else if constexpr (mode == query_mode::orr) {
                 got = single_query_or<false>(index, kmer, k);
             } else {
                 got = single_query_or<true>(index, kmer, k);
@@ -287,7 +285,7 @@ void query_kmers_single(fms_index& index, char* sequence, char* rc_sequence, siz
                     got = single_query_order(index, rc_kmer, k);
                     backward_predictor_result = got >= 0 ? 1 : -1;
                 }
-            } if constexpr (mode == query_mode::orr) {
+            } else if constexpr (mode == query_mode::orr) {
                 if (got != 1) {
                     got = single_query_or<false>(index,rc_kmer , k);
                     backward_predictor_result = got;
