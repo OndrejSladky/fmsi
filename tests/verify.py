@@ -37,10 +37,10 @@ def read_masked_superstring(file):
     return masked_superstring
 
 def run_fmsi_index(file):
-    subprocess.run([fmsi_path, 'index', '-p', file])
+    subprocess.run([fmsi_path, 'index', file])
 
 def create_fmsi_process(file, k, optimize):
-    return subprocess.Popen([fmsi_path, 'query', '-p', file, '-q', '-', '-k', str(k), '-F'] + (['-O'] if optimize else []), stdout=subprocess.PIPE, stdin=subprocess.PIPE)
+    return subprocess.Popen([fmsi_path, 'query', '-q', '-', '-k', str(k)] + (['-O'] if optimize else []) + [file], stdout=subprocess.PIPE, stdin=subprocess.PIPE)
 
 def get_kmer_presence_map(sequence, superstring, mask, k):
     return "".join([str(int(f_or(lmbda(superstring, mask, sequence[i:i+k])))) for i in range(len(sequence) - k + 1)])
@@ -49,13 +49,16 @@ def get_kmer_presence_map(sequence, superstring, mask, k):
 def assert_correct_results(process, superstring, mask, kmers, k: int):
     results = []
     for seq in kmers:
-        process.stdin.write(f">\n{seq}\n".encode())
+        process.stdin.write(f">header\n{seq}\n".encode())
         results.append(get_kmer_presence_map(seq, superstring, mask, k))
     process.stdin.close()
     index = 0
     for line in process.stdout:
         expected = results[index]
-        got = line.decode().strip()
+        got = line.decode().strip().split('\t')
+        header = got[0]
+        got = got[1]
+        assert header == "header", f"Unexpected line header {header}"
         assert expected == got, f"Expected '{expected}' as output, got '{got}'"
         print(".", end="")
         if (index + 1) % 50 == 0:

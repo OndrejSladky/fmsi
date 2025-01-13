@@ -5,20 +5,20 @@ TESTS=testfiles
 
 mkdir -p $BIN
 
-$PROG index -p $TESTS/integration_a.fa
-$PROG index -p $TESTS/integration_b.fa
+$PROG index $TESTS/integration_a.fa
+$PROG index $TESTS/integration_b.fa
 
 $PROG merge -p $TESTS/integration_a.fa -p $TESTS/integration_b.fa -r $BIN/merged.fa
 
-$PROG query -F -k 3 -p $TESTS/integration_a.fa -q $TESTS/queries.txt > $BIN/a.txt 2> /dev/null
-$PROG query -F -k 3 -p $TESTS/integration_a.fa -q $TESTS/queries.txt -f xor > $BIN/a_xor.txt 2> /dev/null
-$PROG query -F -k 3 -p $TESTS/integration_b.fa -q $TESTS/queries.txt > $BIN/b.txt 2> /dev/null
-$PROG query -F -k 3 -p $TESTS/integration_b.fa -q $TESTS/queries.txt -f xor > $BIN/b_xor.txt 2> /dev/null
-$PROG query -F -k 3 -p $BIN/merged.fa -q $TESTS/queries.txt > $BIN/merged.txt 2> /dev/null
-$PROG query -F -k 3 -p $BIN/merged.fa -q $TESTS/queries.txt -f xor > $BIN/merged_xor.txt 2> /dev/null
+$PROG query -k 3 -q $TESTS/queries.txt $TESTS/integration_a.fa > $BIN/a.txt 2> /dev/null
+$PROG query -k 3 -q $TESTS/queries.txt -f xor $TESTS/integration_a.fa > $BIN/a_xor.txt 2> /dev/null
+$PROG query -k 3 -q $TESTS/queries.txt $TESTS/integration_b.fa > $BIN/b.txt 2> /dev/null
+$PROG query -k 3 -q $TESTS/queries.txt -f xor $TESTS/integration_b.fa > $BIN/b_xor.txt 2> /dev/null
+$PROG query -k 3 -q $TESTS/queries.txt $BIN/merged.fa > $BIN/merged.txt 2> /dev/null
+$PROG query -k 3 -q $TESTS/queries.txt -f xor $BIN/merged.fa > $BIN/merged_xor.txt 2> /dev/null
 
 #$PROG normalize -k 3 -p $BIN/merged.fa -s -l > $BIN/merged_normalized.fa 2> /dev/null
-$PROG normalize -k 3 -p $BIN/merged.fa -s > $BIN/merged_normalized2.fa 2> /dev/null
+$PROG normalize -k 3 -s $BIN/merged.fa > $BIN/merged_normalized2.fa 2> /dev/null
 
 
 
