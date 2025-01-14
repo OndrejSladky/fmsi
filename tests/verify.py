@@ -68,7 +68,7 @@ def assert_correct_results(process, superstring, mask, kmers, k: int):
 
 def all_present_kmers(k, superstring, mask):
     result = []
-    for i in range(superstring) - k + 1:
+    for i in range(len(superstring) - k + 1):
         if mask[i] == '1':
             result.append(f">header\n{superstring[i:i+k].upper()}")
     return "\n".join(result) + "\n", len(result)
