@@ -39,8 +39,8 @@ def read_masked_superstring(file):
 def run_fmsi_index(file):
     subprocess.run([fmsi_path, 'index', file])
 
-def create_fmsi_process(file, k, optimize):
-    return subprocess.Popen([fmsi_path, 'query', '-q', '-', '-k', str(k)] + (['-O'] if optimize else []) + [file], stdout=subprocess.PIPE, stdin=subprocess.PIPE)
+def create_fmsi_process(file, k, optimize, subcommand):
+    return subprocess.Popen([fmsi_path, subcommand, '-q', '-', '-k', str(k)] + (['-O'] if optimize else []) + [file], stdout=subprocess.PIPE, stdin=subprocess.PIPE)
 
 def get_kmer_presence_map(sequence, superstring, mask, k):
     return "".join([str(int(f_or(lmbda(superstring, mask, sequence[i:i+k])))) for i in range(len(sequence) - k + 1)])
@@ -125,13 +125,17 @@ def main():
 
     run_fmsi_index(args.path)
     superstring, mask = separate_mask_and_superstring(read_masked_superstring(args.path))
-    if args.query_path:
-        with open(args.query_path, 'r') as f:
-            kmers = f.readlines()
+    process = create_fmsi_process(args.path, args.k, args.optimize, 'lookup' if args.hashes else 'query')
+    if args.hashes:
+        assert_correct_hashes(process, args.k, superstring, mask)
+
     else:
-        kmers = generate_random_kmers(args.k + args.streaming_length - 1, superstring, args.num_queries)
-    process = create_fmsi_process(args.path, args.k, args.optimize)
-    assert_correct_results(process, superstring, mask, kmers, args.k)
+        if args.query_path:
+            with open(args.query_path, 'r') as f:
+                kmers = f.readlines()
+        else:
+            kmers = generate_random_kmers(args.k + args.streaming_length - 1, superstring, args.num_queries)
+        assert_correct_results(process, superstring, mask, kmers, args.k)
     print()
     print("OK")
 

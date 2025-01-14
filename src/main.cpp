@@ -22,6 +22,7 @@ static int usage() {
   std::cerr << "Command (stable):" << std::endl;
   std::cerr << "    index   - Creates a BWT based index of the given masked superstring." << std::endl;
   std::cerr << "    query   - Queries k-mers against an index." << std::endl;
+  std::cerr << "    lookup  - Return unique hashes of present k-mers." << std::endl;
   std::cerr << "    export  - Print the underlying masked superstring to stdout." << std::endl << std::endl;
   std::cerr << "Command (experimental, using f-MS framework):" << std::endl;
   std::cerr << "    union   - Compute union of k-mers from several indices." << std::endl;
@@ -106,7 +107,6 @@ static int usage_query() {
             << std::endl;
   std::cerr << "  -k INT  - Size of k-mers [default: infer automatically from index]"
             << std::endl;
-  std::cerr << "  -H      - Output k-mer hashes for found k-mers (and -1 for missing) instead of bitmask." << std::endl;
   std::cerr << "  -S      - Use kLCP array for streamed queries (increses memory consumption)" << std::endl;
   std::cerr << "  -O      - FMSI uses properties of max-one masked superstrings to speed up queries" << std::endl;
   std::cerr << "            Use only if a masked superstring with maximum number of ones is indexed." << std::endl;
@@ -114,6 +114,24 @@ static int usage_query() {
   usage_functions();
   std::cerr << std::endl;
   return 1;
+}
+
+static int usage_lookup() {
+  std::cerr << std::endl;
+  std::cerr << "Usage:   fmsi lookup [options] <index-prefix>" << std::endl << std::endl;
+  std::cerr << "Options (stable):" << std::endl;
+  std::cerr << "  -q FILE - Path to FASTA/FASTQ with queries [default: stdin]"
+            << std::endl;
+  std::cerr << "  -k INT  - Size of k-mers [default: infer automatically from index]"
+            << std::endl;
+  std::cerr << "  -S      - Use kLCP array for streamed queries (increses memory consumption)" << std::endl;
+  std::cerr << std::endl;
+  return 1;
+}
+
+static int usage_query(bool lookup) {
+  if (lookup) return usage_lookup();
+  return usage_query();
 }
 
 static int usage_normalize() {
@@ -217,9 +235,8 @@ int ms_index(int argc, char *argv[]) {
   return 0;
 }
 
-int ms_query(int argc, char *argv[]) {
+int ms_query(int argc, char *argv[], bool output_orders) {
   bool usage = false;
-  bool output_orders = false;
   int c;
   int k = 0;
   std::string fn;
@@ -233,7 +250,7 @@ int ms_query(int argc, char *argv[]) {
   std::string f_name = "or";
   std::function<bool(size_t, size_t)> f = mask_function("or");
   bool has_klcp = false;
-  while ((c = getopt(argc, argv, "f:hq:k:OSH")) >= 0) {
+  while ((c = getopt(argc, argv, "f:hq:k:OS")) >= 0) {
     switch (c) {
     case 'f':
       try {
@@ -264,42 +281,39 @@ int ms_query(int argc, char *argv[]) {
     case 'S':
       has_klcp = true;
       break;
-    case 'H':
-      output_orders = true;
-      break;
     default:
-      return usage_query();
+      return usage_query(output_orders);
     }
   }
   if (usage) {
-    usage_query();
+    usage_query(output_orders);
     return 0;
   } else if (fn.empty()) {
     std::cerr << "ERROR: Path to the fasta file is a required argument." << std::endl;
-    return usage_query();
+    return usage_query(output_orders);
   }
   if (output_orders && f_name == "all") {
     std::cerr << "WARNING: The current version of FMSI has speed benefits only if output as (minimum) perfect hash function is not used. Additionally, if you desire minimum perfect hash function, please minimize the number of ones in the mask." << std::endl;
   } else if (f_name != "or" && output_orders) {
     std::cerr << "ERROR: FMSI as Minimum Perfect Hash Function is not allowed with f-masked superstrings in the current version." << std::endl;
-    return usage_query();
+    return usage_query(output_orders);
   }
 
   fms_index index = load_index(fn, has_klcp);
 
   if (index.sa_transformed_mask.size() == 0) {
     std::cerr << "ERROR: index not correctly loaded. Ensure that you correctly call `fmsi index` before." << std::endl;
-    return usage_query();
+    return usage_query(output_orders);
   }
 
   if (has_klcp != (index.klcp.size() > 0)) {
     std::cerr << "ERROR: kLCP array was not constructed for the given index. Either construct it again without the `-s` flag or use `query -s` which slows down streaming queries." << std::endl;
-    return usage_query();
+    return usage_query(output_orders);
   }
   int index_k = index.k;
   if (k != 0 && k != index_k) {
     std::cerr << "ERROR: Mismatch. Provided k (" << k << ") does not match the k of the index (" << index_k << ")." << std::endl;
-    return usage_query();
+    return usage_query(output_orders);
   }
   if (k == 0) {
     k = index_k;
@@ -659,7 +673,9 @@ int main(int argc, char *argv[]) {
   if (op == "index")
     ret = ms_index(argc - 1, argv + 1);
   else if (op == "query")
-    ret = ms_query(argc - 1, argv + 1);
+    ret = ms_query(argc - 1, argv + 1, false);
+  else if (op == "lookup")
+    ret = ms_query(argc - 1, argv + 1, true);
   else if (op == "clean")
     ret = ms_clean(argc - 1, argv + 1);
   else if (op == "merge")
