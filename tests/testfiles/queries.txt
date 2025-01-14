@@ -1,18 +1,18 @@
->
+>0
 ACG
->
+>1
 CGT
->
+>2
 TAC
->
+>3
 AAA
->
+>4
 TGT
->
+>5 with comment
 ACGT
->
+>6
 ACA
->
+>7
 GTA
->
+>last
 CAT

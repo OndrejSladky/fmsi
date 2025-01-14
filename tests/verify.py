@@ -37,38 +37,63 @@ def read_masked_superstring(file):
     return masked_superstring
 
 def run_fmsi_index(file):
-    subprocess.run([fmsi_path, 'index', '-p', file])
+    subprocess.run([fmsi_path, 'index', file])
 
-def create_fmsi_process(file, k, optimize):
-    return subprocess.Popen([fmsi_path, 'query', '-p', file, '-q', '-', '-k', str(k), '-F'] + (['-O'] if optimize else []), stdout=subprocess.PIPE, stdin=subprocess.PIPE)
+def create_fmsi_process(file, k, optimize, subcommand):
+    return subprocess.Popen([fmsi_path, subcommand, '-q', '-', '-k', str(k)] + (['-O'] if optimize else []) + [file], stdout=subprocess.PIPE, stdin=subprocess.PIPE)
 
-def get_total_kmers(sequence, k):
-    return len(sequence) - k + 1
-
-def get_valid_kmers(sequence, k):
-    return sum(all(c in "ACGT" for c in sequence[i:i+k]) for i in range(len(sequence) - k + 1))
-
-def get_positive_kmers(sequence, superstring, mask, k):
-    return sum(f_or(lmbda(superstring, mask, sequence[i:i+k])) for i in range(len(sequence) - k + 1))
+def get_kmer_presence_map(sequence, superstring, mask, k):
+    return "".join([str(int(f_or(lmbda(superstring, mask, sequence[i:i+k])))) for i in range(len(sequence) - k + 1)])
 
 
 def assert_correct_results(process, superstring, mask, kmers, k: int):
     results = []
-    for i, kmer in enumerate(kmers):
-        process.stdin.write(f">\n{kmer}\n".encode())
-        results.append([get_total_kmers(kmer, k), get_valid_kmers(kmer, k), get_positive_kmers(kmer, superstring, mask, k)])
+    for seq in kmers:
+        process.stdin.write(f">header\n{seq}\n".encode())
+        results.append(get_kmer_presence_map(seq, superstring, mask, k))
     process.stdin.close()
     index = 0
     for line in process.stdout:
-        total_count, valid_count, positive_count = results[index]
-        total_kmers, valid_kmers, found_kmers = map(int, line.decode().strip().split(","))
-        assert total_count == total_kmers, f"Expected {total_kmers} kmers, got {total_count}"
-        assert valid_count == valid_kmers, f"Expected {valid_kmers} valid kmers, got {valid_count}"
-        assert positive_count == found_kmers, f"Expected {found_kmers} positive kmers, got {positive_count}"
+        expected = results[index]
+        got = line.decode().strip().split('\t')
+        header = got[0]
+        got = got[1]
+        assert header == "header", f"Unexpected line header {header}"
+        assert expected == got, f"Expected '{expected}' as output, got '{got}'"
         print(".", end="")
         if (index + 1) % 50 == 0:
             print()
         index += 1
+
+
+def all_present_kmers(k, superstring, mask):
+    result = []
+    for i in range(len(superstring) - k + 1):
+        if mask[i] == '1':
+            result.append(f">header\n{superstring[i:i+k].upper()}")
+    return "\n".join(result) + "\n", len(result)
+
+
+def assert_correct_hashes(process, k, superstring, mask):
+    process_input, kmers = all_present_kmers(k, superstring, mask)
+    already_hashed = [False] * kmers
+    process.stdin.write(process_input.encode())
+    process.stdin.close()
+    index= 0
+    for line in process.stdout:
+        got = line.decode().strip().split('\t')
+        header = got[0]
+        hash_value = got[1]
+        assert header == "header", f"Unexpected line header {header}"
+        # Check surjectivity which on set of same size is equivalent to bijectivity.
+        assert 0 <= hash_value < kmers, f"Hash value {hash_value} out of range"
+        assert not already_hashed[hash_value], f"Duplicate hash value {hash_value}"
+        already_hashed[hash_value] = True
+        print(".", end="")
+        if (index + 1) % 50 == 0:
+            print()
+        index += 1
+
 
 def generate_random_kmers(k, superstring, num_queries):
     threshold = 0.5 * (len(superstring) > k)
@@ -91,17 +116,26 @@ def main():
     parser.add_argument("--query_path", help="the path to the query file; if not specified, random queries are generated")
     parser.add_argument("--num_queries", type=int, help="the number of queries to generate if no query file is specified", default=1000)
     parser.add_argument("--optimize", type=bool, help="if queries should optimize for maximizing the number of ones in the mask", default=False)
+    parser.add_argument("--hashes", type=bool, help="check the minimum perfect hash functionality", default=False)
     args = parser.parse_args()
+
+    if args.hashes and (args.query_path or args.optimize):
+        print("Invalid combination of parameters")
+        exit(1)
 
     run_fmsi_index(args.path)
     superstring, mask = separate_mask_and_superstring(read_masked_superstring(args.path))
-    if args.query_path:
-        with open(args.query_path, 'r') as f:
-            kmers = f.readlines()
+    process = create_fmsi_process(args.path, args.k, args.optimize, 'lookup' if args.hashes else 'query')
+    if args.hashes:
+        assert_correct_hashes(process, args.k, superstring, mask)
+
     else:
-        kmers = generate_random_kmers(args.k + args.streaming_length - 1, superstring, args.num_queries)
-    process = create_fmsi_process(args.path, args.k, args.optimize)
-    assert_correct_results(process, superstring, mask, kmers, args.k)
+        if args.query_path:
+            with open(args.query_path, 'r') as f:
+                kmers = f.readlines()
+        else:
+            kmers = generate_random_kmers(args.k + args.streaming_length - 1, superstring, args.num_queries)
+        assert_correct_results(process, superstring, mask, kmers, args.k)
     print()
     print("OK")
 

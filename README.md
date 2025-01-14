@@ -82,7 +82,7 @@ export PATH="$PATH:$(pwd)"
 
 ## Usage
 
-### k-mer queries (stable)
+### k-mer membership queries queries (stable)
 
 1. Compute an optimized masked superstring for all k-mers from a given FASTA file by [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel).
    ```
@@ -92,20 +92,43 @@ export PATH="$PATH:$(pwd)"
 
 2. Create an FMS index from the masked superstring:
    ```
-   fmsi index -p ms.fa -k 31
+   fmsi index -k 31 ms.fa
    ```
 
 3. Query the index from a given query FASTA file with k-mers:
    ```
-   fmsi query -p ms.fa -q query.fa -k 31 -O
+   fmsi query -O -q query.fa -k 31 ms.fa
    ```
+
+#### Output format
+
+For each line of queries, FMSI outputs one bitstring, where 1 corresponds to a present *k*-mer and 0 corresponds to not present *k*-mer.
+Invalid *k*-mers, i.e., those that contain non-ACGT characters are also indicated with 0s.
 
 #### Specific-case usage
 
-If you do not need support for streaming queries, use the `-s` flag when querying for additional memory savings.
+If you need support for streaming queries, use the `-S` for speed enhancements at the cost of additional bit per superstring character.
 
 If your mask superstring does not maximizes the number of ones in the mask, omit the `-O` optimization flag for query as otherwise you might get incorrect results.
 We, however, recommend to optimize the mask using `kmercamel optimize`.
+
+### k-mer lookup queries (stable)
+
+1. Compute a default masked superstring for all k-mers from a given FASTA file by [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel).
+   ```
+   kmercamel -k 31 -c -o ms.fa input_file.fa
+   ```
+
+2. Create an FMS index from the masked superstring:
+   ```
+   fmsi index -k 31 ms.fa
+   ```
+
+3. Query the index from a given query FASTA file with k-mers:
+   ```
+   fmsi query -H -q query.fa -k 31 ms.fa
+   ```
+
 
 ### k-mer set operations (experimental)
 
@@ -120,14 +143,14 @@ This can be done in a few simple steps:
 1. **Compute a masked superstring.**
    - This can be done by [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel); simply run `kmercamel -c -k 31 -p fasta.fa -o ms.fa` (with appropriate values for `-k` and `-p`).
    - If you obtained the masked superstring in a different way, make sure it minimizes the number of ones; if you're unsure, you can use `kmercamel optimize -c -a zeros -k 31 -p ms_more_ones.fa -o ms.fa`. No need to optimize superstrings directly computed by KmerCamel🐫.
-2. **Index the masked superstring** with `fmsi index -p ms.fa`.
+2. **Index the masked superstring** with `fmsi index ms.fa`.
 3. **Perform the set operations** you wish with `fmsi [operation] -k 31 -p ms1.fa -p ms2.fa -r ms.fa`. Possible operations (use the names instead of `[operation]`) are:
    - `union` to compute the union.
    - `inter` to compute the intersection
    - `diff` to compute the set difference
    - `symdiff` to compute the symmetric difference
-4. **Query the index** with `fmsi query -p ms.fa -q query.fa -k 31`.
-5. To **get back the underlying masked superstring**, use `fmsi export -p ms.fa`.
+4. **Query the index** with `fmsi query -q query.fa -k 31 ms.fa`.
+5. To **get back the underlying masked superstring**, use `fmsi export ms.fa`.
 
 If you use FMSI this way, it ensures that operations in any order and queries to any index are computed correctly,
 while keeping the memory usage for queries as low as possible. Furthermore, exported $f$-masked superstrings are always,
