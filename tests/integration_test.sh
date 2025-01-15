@@ -11,7 +11,7 @@ $PROG index $TESTS/integration_b.fa
 $PROG merge -p $TESTS/integration_a.fa -p $TESTS/integration_b.fa -r $BIN/merged.fa
 
 $PROG query -k 3 -q $TESTS/queries.txt $TESTS/integration_a.fa > $BIN/a.txt 2> /dev/null
-$PROG lookup -k 3 -q $TESTS/queries.txt $TESTS/integration_a.fa > $BIN/a_hash.txt 2> /dev/null
+$PROG hash -k 3 -q $TESTS/queries.txt $TESTS/integration_a.fa > $BIN/a_hash.txt 2> /dev/null
 $PROG query -k 3 -q $TESTS/queries.txt -f xor $TESTS/integration_a.fa > $BIN/a_xor.txt 2> /dev/null
 $PROG query -k 3 -q $TESTS/queries.txt $TESTS/integration_b.fa > $BIN/b.txt 2> /dev/null
 $PROG query -k 3 -q $TESTS/queries.txt -f xor $TESTS/integration_b.fa > $BIN/b_xor.txt 2> /dev/null

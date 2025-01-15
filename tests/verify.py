@@ -125,7 +125,7 @@ def main():
 
     run_fmsi_index(args.path)
     superstring, mask = separate_mask_and_superstring(read_masked_superstring(args.path))
-    process = create_fmsi_process(args.path, args.k, args.optimize, 'lookup' if args.hashes else 'query')
+    process = create_fmsi_process(args.path, args.k, args.optimize, 'hash' if args.hashes else 'query')
     if args.hashes:
         assert_correct_hashes(process, args.k, superstring, mask)
 

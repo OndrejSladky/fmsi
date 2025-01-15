@@ -112,7 +112,7 @@ If you need support for streaming queries, use the `-S` for speed enhancements a
 If your mask superstring does not maximizes the number of ones in the mask, omit the `-O` optimization flag for query as otherwise you might get incorrect results.
 We, however, recommend to optimize the mask using `kmercamel optimize`.
 
-### k-mer lookup queries (stable)
+### k-mer hash queries (stable)
 
 1. Compute a default masked superstring for all k-mers from a given FASTA file by [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel).
    ```
@@ -124,9 +124,9 @@ We, however, recommend to optimize the mask using `kmercamel optimize`.
    fmsi index -k 31 ms.fa
    ```
 
-3. Query the index from a given query FASTA file with k-mers:
+3. Query the index from a given query FASTA file with k-mers for hashes:
    ```
-   fmsi query -H -q query.fa -k 31 ms.fa
+   fmsi hash -q query.fa -k 31 ms.fa
    ```
 
 

@@ -22,7 +22,7 @@ static int usage() {
   std::cerr << "Command (stable):" << std::endl;
   std::cerr << "    index   - Creates a BWT based index of the given masked superstring." << std::endl;
   std::cerr << "    query   - Queries k-mers against an index." << std::endl;
-  std::cerr << "    lookup  - Return unique hashes of present k-mers." << std::endl;
+  std::cerr << "    hash    - Return unique hashes of present k-mers." << std::endl;
   std::cerr << "    export  - Print the underlying masked superstring to stdout." << std::endl << std::endl;
   std::cerr << "Command (experimental, using f-MS framework):" << std::endl;
   std::cerr << "    union   - Compute union of k-mers from several indices." << std::endl;
@@ -116,9 +116,9 @@ static int usage_query() {
   return 1;
 }
 
-static int usage_lookup() {
+static int usage_hash() {
   std::cerr << std::endl;
-  std::cerr << "Usage:   fmsi lookup [options] <index-prefix>" << std::endl << std::endl;
+  std::cerr << "Usage:   fmsi hash [options] <index-prefix>" << std::endl << std::endl;
   std::cerr << "Options (stable):" << std::endl;
   std::cerr << "  -q FILE - Path to FASTA/FASTQ with queries [default: stdin]"
             << std::endl;
@@ -129,8 +129,8 @@ static int usage_lookup() {
   return 1;
 }
 
-static int usage_query(bool lookup) {
-  if (lookup) return usage_lookup();
+static int usage_query(bool hash) {
+  if (hash) return usage_hash();
   return usage_query();
 }
 
@@ -674,7 +674,7 @@ int main(int argc, char *argv[]) {
     ret = ms_index(argc - 1, argv + 1);
   else if (op == "query")
     ret = ms_query(argc - 1, argv + 1, false);
-  else if (op == "lookup")
+  else if (op == "hash")
     ret = ms_query(argc - 1, argv + 1, true);
   else if (op == "clean")
     ret = ms_clean(argc - 1, argv + 1);
