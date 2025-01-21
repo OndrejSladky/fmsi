@@ -48,6 +48,7 @@ struct strand_predictor {
     }
 };
 
+constexpr int RRR_BLOCK_SIZE = 63;
 struct fms_index {
     sdsl::bit_vector ac_gt;
     sdsl::rank_support_v5<1> ac_gt_rank;
@@ -55,8 +56,8 @@ struct fms_index {
     sdsl::rank_support_v5<1> ac_rank;
     sdsl::bit_vector gt;
     sdsl::rank_support_v5<1> gt_rank;
-    sdsl::rrr_vector<255> sa_transformed_mask;
-    sdsl::rank_support_rrr<1, 255> mask_rank;
+    sdsl::rrr_vector<RRR_BLOCK_SIZE> sa_transformed_mask;
+    sdsl::rank_support_rrr<1, RRR_BLOCK_SIZE> mask_rank;
     std::vector<size_t> counts;
     size_t dollar_position;
     sdsl::bit_vector klcp;
@@ -420,7 +421,7 @@ fms_index construct(std::string &ms, int k, bool use_klcp) {
         }
     }
     delete[] sa;
-    index.sa_transformed_mask = sdsl::rrr_vector<255>(sa_transformed_mask);
+    index.sa_transformed_mask = sdsl::rrr_vector<RRR_BLOCK_SIZE>(sa_transformed_mask);
     sa_transformed_mask.resize(0);
 
     index.ac_gt = sdsl::bit_vector(bwt.size());
@@ -451,7 +452,7 @@ fms_index construct(std::string &ms, int k, bool use_klcp) {
     index.ac_gt_rank = sdsl::rank_support_v5<1>(&index.ac_gt);
     index.ac_rank = sdsl::rank_support_v5<1>(&index.ac);
     index.gt_rank = sdsl::rank_support_v5<1>(&index.gt);
-    index.mask_rank = sdsl::rank_support_rrr<1, 255>(&index.sa_transformed_mask);
+    index.mask_rank = sdsl::rank_support_rrr<1, RRR_BLOCK_SIZE>(&index.sa_transformed_mask);
 
     index.k = k;
 
@@ -508,7 +509,7 @@ fms_index load_index(const std::string &fn, bool use_klcp = true) {
     sdsl::load_from_file(index.gt, basename + ".gt");
     index.gt_rank = sdsl::rank_support_v5<1>(&index.gt);
     sdsl::load_from_file(index.sa_transformed_mask, basename + ".mask");
-    index.mask_rank = sdsl::rank_support_rrr<1, 255>(&index.sa_transformed_mask);
+    index.mask_rank = sdsl::rank_support_rrr<1, RRR_BLOCK_SIZE>(&index.sa_transformed_mask);
     if (std::filesystem::exists(basename + ".klcp") && use_klcp) {
         sdsl::load_from_file(index.klcp, basename + ".klcp");
     }
