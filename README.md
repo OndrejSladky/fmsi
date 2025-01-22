@@ -100,6 +100,8 @@ export PATH="$PATH:$(pwd)"
    fmsi query -O -q query.fa -k 31 ms.fa
    ```
 
+Note that the path for FMSI (i.e., `ms.fa`) needs to be the last argument.
+
 #### Output format
 
 For each line of queries, FMSI outputs one bitstring, where 1 corresponds to a present *k*-mer and 0 corresponds to not present *k*-mer.
