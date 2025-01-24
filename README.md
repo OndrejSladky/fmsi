@@ -128,7 +128,7 @@ We, however, recommend to optimize the mask using `kmercamel optimize`.
 
 3. Query the index from a given query FASTA file with k-mers:
    ```
-   fmsi query -H -q query.fa -k 31 ms.fa
+   fmsi lookup -q query.fa -k 31 ms.fa
    ```
 
 
