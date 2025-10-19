@@ -87,8 +87,7 @@ export PATH="$PATH:$(pwd)"
 
 1. Compute an optimized masked superstring for all k-mers from a given FASTA file by [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel).
    ```
-   kmercamel -p input_file.fa -k 31 -c -o ms-no-opt.fa
-   kmercamel optimize -p ms-no-opt.fa -k 31 -c -o ms.fa
+   kmercamel compute -k 31 -o /dev/null -M ms.fa yourfile.fa
    ```
 
 2. Create an FMS index from the masked superstring:
@@ -119,7 +118,7 @@ We, however, recommend to optimize the mask using `kmercamel optimize`.
 
 1. Compute a default masked superstring for all k-mers from a given FASTA file by [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel).
    ```
-   kmercamel -k 31 -c -o ms.fa input_file.fa
+   kmercamel compute -k 31 -o ms.fa yourfile.fa
    ```
 
 2. Create an FMS index from the masked superstring:
