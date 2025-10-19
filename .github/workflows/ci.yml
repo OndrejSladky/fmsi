@@ -32,9 +32,9 @@ jobs:
       run: git submodule init; git submodule update
     - name: downgrade-cmake
       run: |
-          curl -LO https://github.com/Kitware/CMake/releases/download/v3.30.0/cmake-3.30.0-macos-universal.tar.gz
-          tar -xzf cmake-3.30.0-macos-universal.tar.gz
-          echo "${PWD}/cmake-3.30.0-macos-universal/CMake.app/Contents/bin" >> $GITHUB_PATH
+          curl -LO https://github.com/Kitware/CMake/releases/download/v3.30.0/cmake-3.25.0-macos-universal.tar.gz
+          tar -xzf cmake-3.25.0-macos-universal.tar.gz
+          echo "${PWD}/cmake-3.25.0-macos-universal/CMake.app/Contents/bin" >> $GITHUB_PATH
     - name: install-sdsl
       run: ./src/sdsl-lite/install.sh ~
     - name: make
