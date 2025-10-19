@@ -15,11 +15,6 @@ jobs:
     - uses: actions/checkout@v3
     - name: submodule
       run: git submodule init; git submodule update
-    - name: downgrade-cmake
-      run: |
-        brew uninstall cmake
-        brew install cmake@3.2
-        brew link cmake@3.2 --force
     - name: install-sdsl
       run: ./src/sdsl-lite/install.sh ~
     - name: make
@@ -35,6 +30,11 @@ jobs:
     - uses: actions/checkout@v3
     - name: submodule
       run: git submodule init; git submodule update
+    - name: downgrade-cmake
+      run: |
+        brew uninstall cmake
+        brew install cmake@3.2
+        brew link cmake@3.2 --force
     - name: install-sdsl
       run: ./src/sdsl-lite/install.sh ~
     - name: make
