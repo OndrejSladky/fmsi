@@ -179,8 +179,8 @@ class louds_tree
 
         void swap(louds_tree& tree) {
             m_bv.swap(tree.m_bv);
-            util::swap_support(m_bv_select1, tree.m_select1, &m_bv, &(tree.m_bv));
-            util::swap_support(m_bv_select0, tree.m_select0, &m_bv, &(tree.m_bv));
+            util::swap_support(m_bv_select1, tree.m_bv_select1, &m_bv, &(tree.m_bv));
+            util::swap_support(m_bv_select0, tree.m_bv_select0, &m_bv, &(tree.m_bv));
         }
 
         size_type serialize(std::ostream& out, structure_tree_node* v=nullptr, std::string name="")const {
