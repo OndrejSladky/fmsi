@@ -83,7 +83,7 @@ export PATH="$PATH:$(pwd)"
 
 ## Usage
 
-### k-mer membership queries queries (stable)
+### k-mer membership queries (stable)
 
 1. Compute an optimized masked superstring for all k-mers from a given FASTA file by [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel).
    ```
