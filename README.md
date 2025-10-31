@@ -104,7 +104,7 @@ Note that the path for FMSI (i.e., `ms.fa`) needs to be the last argument.
 
 #### Output format
 
-For each line of queries, FMSI outputs one bitstring, where 1 corresponds to a present *k*-mer and 0 corresponds to not present *k*-mer.
+For each line of queries, FMSI outputs an identifier and one bitstring, where 1 corresponds to a present *k*-mer and 0 corresponds to not present *k*-mer.
 Invalid *k*-mers, i.e., those that contain non-ACGT characters are also indicated with 0s.
 
 #### Specific-case usage
@@ -130,6 +130,11 @@ We, however, recommend to optimize the mask using `kmercamel optimize`.
    ```
    fmsi lookup -q query.fa -k 31 ms.fa
    ```
+
+#### Output format
+
+For each line of lookup queries, FMSI outputs an identifier and a comma-separated list of unique integer for each present k-mer between 0 and number of k-mers - 1.
+K-mers that are not present in the index are marked with -1.
 
 
 ### k-mer set operations (experimental)
@@ -210,7 +215,6 @@ The memory consumption of the index is split as follows:
 - $1$ byte per character of the largest entry in the queried fasta file (which is typically negligible).
 
 The construction of the index requires the full suffix array to be computed and requires up to 17 bytes per superstring character.
-
 
 
 ## Testing
