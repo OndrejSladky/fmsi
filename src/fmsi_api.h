@@ -10,31 +10,34 @@
  * @param ms a masked superstring in masked-case (ACGT implies 1 in mask, acgt 0 in mask).
  * @param k the length of one k-mer
  * @param construct_klcp whether the construction should also create a kLCP array.
- *                       Uses more memory and time, but enables streamed queries.
+ *                       Uses more memory (1 bit per char) and time, but enables streamed queries.
+ * @param construct_access_support whether the construction should also create support for k-mer access.
+ *                                 Uses more memory (<=0.4 bits per char) 
  * @param T the integer size used for construction of kLCP, should be smallest integers with bitlength larger than k.
  *          Relevant only if [construct_klcp] is set to `true`.
  */
 template <typename T>
-fms_index fmsi_construct(std::string &ms, int k, bool construct_klcp) {
-    return construct<T>(ms, k, construct_klcp);
+fms_index fmsi_construct(std::string &ms, int k, bool construct_klcp, bool construct_access_support) {
+    fms_index index = construct<T>(ms, k, construct_klcp);
+    if (construct_access_support) init_selects(index);
+    return index;
 }
 
 /**
- * Performs a single membership query on the given k-mer.
- * 
- * @param index the FMSI index structure
- * @param kmer the queried k-mer. Ensure the length is exactly k
- * @param k the length of the k-mer.
- * @param maximized_ones whether the underlying masked superstring has mask maximizing ones
- *                       if this is `true`, the queries are faster
- *                       if the masked superstring does not maximize ones, then it has to be set to `false`, otherwise results may be incorrect
- *                       it is recommended, especially for benchmarking to first optimize the masked superstring and set this to `true`.
- * 
- * @return true if k-mer is present in the index.
+ * Constructs a support for kmer access queries. Needs to be executed before running access queries
+ * if [construct_access_support] was not set to `true` during fmsi_construct.
+ * Increases space by at most 0.8 bits / superstring char.
  */
-template <bool maximized_ones>
-bool fmsi_membership_single_query(fms_index& index, char* kmer, int k) {
-    return single_query_or<maximized_ones>(fms_index& index, char* kmer, int k);
+void fmsi_construct_access_support(fms_index& index) {
+    init_selects(index);
+}
+
+/**
+ * Removes a support for kmer access queries to save space.
+ * Decreases space by at most 0.8 bits / superstring char.
+ */
+void fmsi_construct_access_support(fms_index& index) {
+    destroy_selects(index);
 }
 
 
@@ -55,7 +58,7 @@ bool fmsi_membership_single_query(fms_index& index, char* kmer, int k) {
  */
 template <bool maximized_ones>
 bool fmsi_membership_single_query(fms_index& index, char* kmer, int k) {
-    return single_query_or<maximized_ones>(fms_index& index, char* kmer, int k);
+    return single_query_or<maximized_ones>(index, kmer, k) == 1;
 }
 
 
@@ -82,8 +85,8 @@ bool fmsi_membership_single_query(fms_index& index, char* kmer, int k) {
  */
 template <bool minimal_hash, bool maximized_ones>
 int64_t fmsi_lookup_single_query(fms_index& index, char* kmer, int k) {
-    constexpr if (minimal_hash) {
-        constexpr if (maximized_ones) {
+    if constexpr (minimal_hash) {
+        if constexpr (maximized_ones) {
             throw new std::invalid_argument("Minimal hashes are not possible on masked superstrings maximizing the number of ones."); 
         } else {
             return single_query_order(index, kmer, k);
@@ -112,7 +115,7 @@ int64_t fmsi_lookup_single_query(fms_index& index, char* kmer, int k) {
  */
 template <bool maximized_ones>
 std::vector<int64_t> fmsi_membership_streamed_query(fms_index& index, char* pattern, char* reverse_complementary_pattern, size_t sequence_length, int k) {
-    return query_kmers_streaming_with_chunking<maximized_ones>(fms_index, pattern, reverse_complementary_pattern, sequence_length, k, false);
+    return query_kmers_streaming_with_chunking<false, maximized_ones>(index, pattern, reverse_complementary_pattern, sequence_length, k, false);
 }
 
 
@@ -141,7 +144,7 @@ std::vector<int64_t> fmsi_membership_streamed_query(fms_index& index, char* patt
  */
 template <bool minimal_hash, bool maximized_ones>
 std::vector<int64_t> fmsi_lookup_streamed_query(fms_index& index, char* pattern, char* reverse_complementary_pattern, size_t sequence_length, int k) {
-    return query_kmers_streaming_with_chunking<maximized_ones>(fms_index, pattern, reverse_complementary_pattern, sequence_length, k, false);
+    return query_kmers_streaming_with_chunking<minimal_hash, maximized_ones>(index, pattern, reverse_complementary_pattern, sequence_length, k, true);
 }
 
 /**
@@ -156,6 +159,6 @@ std::vector<int64_t> fmsi_lookup_streamed_query(fms_index& index, char* pattern,
  * @return the k-mer corresponding to the hash.
  */
 template <bool minimal_hash>
-char* fmsi_access(fms_index& index, int64_t hash, int k) {
-    return kmer_access<minimal_hash>(fms_index, hash, k);
+std::string fmsi_access(fms_index& index, int64_t hash, int k) {
+    return kmer_access<minimal_hash>(index, hash, k);
 }

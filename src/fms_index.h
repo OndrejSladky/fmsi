@@ -11,6 +11,7 @@
 #include "QSufSort.h"
 #include "functions.h"
 #include "kmers.h"
+#include "parser.h"
 #include <iostream>
 
 typedef unsigned char byte;
@@ -64,10 +65,14 @@ struct fms_index {
     sdsl::bit_vector klcp;
     int k;
     strand_predictor predictor = strand_predictor();
-    sdsl::select_support_hyb<1> ac_gt_select;
-    sdsl::select_support_hyb<1> ac_select;
-    sdsl::select_support_hyb<1> gt_select;
-    sdsl::select_support_rrr<1> mask_select;
+    sdsl::select_support_mcl<0> ac_gt_select0;
+    sdsl::select_support_mcl<0> ac_select0;
+    sdsl::select_support_mcl<0> gt_select0;
+    sdsl::select_support_mcl<1> ac_gt_select1;
+    sdsl::select_support_mcl<1> ac_select1;
+    sdsl::select_support_mcl<1> gt_select1;
+    sdsl::select_support_rrr<1, RRR_BLOCK_SIZE> mask_select;
+    size_t dollar_rank;
 };
 
 
@@ -101,25 +106,26 @@ inline byte access(const fms_index& index, size_t i) {
 }
 
 inline size_t select(const fms_index& index, const byte c, size_t i) {
-    size_t pos;
-    if (c >= 2) {
-        pos = index.gt_select(i);
-        if (c == 2) pos = i - pos;
+    size_t res;
+    if (c == 0) {
+        if (i >= index.dollar_rank) ++i;
+        size_t pos = index.ac_select0(i + 1);
+        res = index.ac_gt_select0(pos + 1);
+    } else if (c == 1) {
+        size_t pos = index.ac_select1(i + 1); 
+        res = index.ac_gt_select0(pos + 1);
+    } else if (c == 2) {
+        size_t pos = index.gt_select0(i + 1);
+        res = index.ac_gt_select1(pos + 1);
     } else {
-        pos = index.ac_select(i);
-        if (c == 0) pos = i - pos;
+        size_t pos = index.gt_select1(i + 1);
+        res = index.ac_gt_select1(pos + 1);
     }
-    size_t res = index.ac_gt_select(pos);
-    if (c <= 1) res = pos - res;
     return res;
 }
 
 inline byte first_column_access(const fms_index& index, size_t i) {
-    byte ret = -1;
-    while (ret != 4 && i < index.counts[ret + 1]) {
-        ret++;
-    }
-    return ret;
+    return ((byte)(i >= index.counts[1])) + ((byte)(i >= index.counts[2]))+ ((byte)(i >= index.counts[3]));
 }
 
 /// Go from range (i,j) for pattern P to range for c+P
@@ -145,7 +151,7 @@ inline void extend_range_with_klcp(const fms_index& index, size_t& i, size_t& j)
 void get_range_with_pattern(const fms_index& index, size_t &sa_start, size_t &sa_end, char* pattern, int k) {
     sa_start = 0;
     sa_end = index.sa_transformed_mask.size();
-    // Find the SA coordinates of the forward pattern.
+    // Find the SA coordnates of the forward pattern.
     for (int i = k-1; i >= 0 && sa_start != sa_end; --i) {
         update_range(index, sa_start, sa_end, nucleotideToInt[(uint8_t)pattern[i]]);
     }
@@ -200,8 +206,8 @@ template <bool maximized_ones=false>
 int64_t single_query_order_nonminimal(fms_index &index, char* pattern, int k) {
     size_t sa_start = -1, sa_end = -1;
     get_range_with_pattern(index, sa_start, sa_end, pattern, k);
-    bool present = infer_presence<maximized_ones>(index, sa_start, sa_end);
-    if (present >= 0) return sa_start;
+    bool present = infer_presence<maximized_ones>(index, sa_start, sa_end) == 1;
+    if (present) return sa_start;
     return -1;
 }
 
@@ -292,7 +298,7 @@ void query_kmers_streaming(fms_index& index, char* sequence, char* rc_sequence, 
 
 
 template <bool minimal_hash, bool maximized_ones>
-void query_kmers_streaming_list(fms_index& index, char* sequence, char* rc_sequence, size_t sequence_length, int k, bool output_orders, std::vector<int64_t> result, size_t result_offset) {
+void query_kmers_streaming_list(fms_index& index, char* sequence, char* rc_sequence, size_t sequence_length, int k, bool output_orders, std::vector<int64_t> &result, size_t result_offset) {
     // Use saturating counter to ensure that RC strings are visited as forward strings.
     bool should_swap = index.predictor.predict_swap();
     if (should_swap) {
@@ -311,10 +317,11 @@ void query_kmers_streaming_list(fms_index& index, char* sequence, char* rc_seque
         }
         if (output_orders) {
             int64_t res;
-            constexpr if (minimal_hash) {
+            if constexpr (minimal_hash) {
                 res = kmer_order_if_present(index, sa_start, sa_end);
             } else {
-                res = sa_start
+                if (infer_presence<maximized_ones>(index, sa_start, sa_end)) res = sa_start;
+                else res = -1;
             }
             result[result_offset + i_back] = res;
             if (result[result_offset + i_back] >= 0) forward_predictor_result++;
@@ -341,10 +348,11 @@ void query_kmers_streaming_list(fms_index& index, char* sequence, char* rc_seque
         }
         int64_t res;
         if (output_orders) {
-            constexpr if (minimal_hash) {
+            if constexpr (minimal_hash) {
                 res = kmer_order_if_present(index, sa_start, sa_end);
             } else {
-                res = sa_start
+                if (infer_presence<maximized_ones>(index, sa_start, sa_end)) res = sa_start;
+                else res = -1;
             }
             if (res >= 0) backward_predictor_result++;
             else backward_predictor_result--;
@@ -352,7 +360,7 @@ void query_kmers_streaming_list(fms_index& index, char* sequence, char* rc_seque
             res = infer_presence<maximized_ones>(index, sa_start, sa_end);
             backward_predictor_result += res;
         }
-        result[i] = std::max(result[i], res);
+        result[result_offset + i] = std::max(result[result_offset + i], res);
     }
     // Log the results to the saturating counter for better future performance.
     if (should_swap) {
@@ -373,30 +381,17 @@ std::vector<int64_t> query_kmers_streaming_with_chunking(fms_index& index, char*
     int64_t max_sequence_chunk_length = 400;
     max_sequence_chunk_length = k + std::max((int64_t)10, std::min(max_sequence_chunk_length, 2*(int64_t)std::sqrt(sequence_length)));
 
-    while (sequence_length > 0) {
-        int64_t current_length = next_invalid_character_or_end(sequence, sequence_length);
-        
-        while (current_length >= k) {
-            int64_t chunk_length = std::min(current_length, max_sequence_chunk_length);
-            query_kmers_streaming<minimal_hash, maximized_ones>(index, sequence, rc_sequence, sequence_length, k, output_orders, of);
-            sequence += chunk_length - k + 1;
-            current_length -= chunk_length - k + 1;
-            sequence_length -= chunk_length - k + 1;
-            result_offset += chunk_length - k + 1; 
-        }
-        // Skip also the next character.
-        sequence_length -= current_length + 1;
-        sequence += current_length + 1;
-        // Print 0 on invalid k-mers.
-        if (sequence_length >= 0) {
-          for (int64_t i = 0; i < std::min((int64_t) k, current_length + 1); ++i) {
-            if (output_orders) {
-              result[result_offset++] = -1;
-            }
-            else {
-              result[result_offset++] = 0;
-            }
-          }
+    while (sequence_length >= k) {
+        int64_t chunk_length = std::min((int64_t)sequence_length, max_sequence_chunk_length);
+        query_kmers_streaming_list<minimal_hash, maximized_ones>(index, sequence, rc_sequence, chunk_length, k, output_orders, result,  result_offset);
+        sequence += chunk_length - k + 1;
+        rc_sequence += chunk_length - k + 1;
+        sequence_length -= chunk_length - k + 1;
+        result_offset += chunk_length - k + 1; 
+    }
+    if (!output_orders) {
+        for (size_t i = 0; i < result.size(); ++i) {
+            result[i] = (result[i] == 1);
         }
     }
     return result;
@@ -533,23 +528,24 @@ sdsl::bit_vector construct_klcp(qsint_t *sa, std::string& ms, size_t k_minus_1) 
     return klcp;
 }
 
-auto _letters = {'A', 'C', 'G', 'T'};
+std::vector<char> _letters = {'A', 'C', 'G', 'T'};
 template <bool minimal_hash>
-char* kmer_access(const fms_index &index, int64_t identifier, int k) {
-    char* result = (char*)(malloc(sizeof(char) * k));
+std::string kmer_access(const fms_index &index, int64_t identifier, int k) {
+    std::vector<char> result(k);
     size_t position = identifier;
-    constexpr if (minimal_hash) {
-        position = index.mask_select(identifier);
+    if constexpr (minimal_hash) {
+        position = index.mask_select(identifier + 1);
     }
 
+
     for (int i = 0; i < k; ++i) {
-        byte nucleotide = first_column_access(position);
+        byte nucleotide = first_column_access(index, position);
         result[i] = _letters[nucleotide];
-        size_t nucleotide_order = position - index.counts[nuclotide];
+        size_t nucleotide_order = position - index.counts[nucleotide];
         position = select(index, nucleotide, nucleotide_order);
     }
 
-    return result;
+    return std::string(result.begin(), result.end());
 }
 
 
@@ -649,7 +645,6 @@ fms_index merge(const fms_index& a, const fms_index& b) {
 }
 
 
-
 void dump_index(const fms_index& index, const std::string &fn) {
     auto basename = fn + ".fmsi";
     sdsl::store_to_file(index.ac_gt, basename + ".ac_gt");
@@ -694,23 +689,26 @@ fms_index load_index(const std::string &fn, bool use_klcp = true) {
     return index;
 }
 
-// inline bool selects_loaded(const fms_index& index) {
-//     return index.ac_gt_select != nullptr && index.ac_select != nullptr &&
-//             index.gt_select != nullptr && index.mask_select != nullptr;
-// }
 
+void init_selects(fms_index& index) {
+    index.ac_gt_select0 = sdsl::select_support_mcl<0>(&index.ac_gt);
+    index.ac_select0 = sdsl::select_support_mcl<0>(&index.ac);
+    index.gt_select0 = sdsl::select_support_mcl<0>(&index.gt);
+    index.ac_gt_select1 = sdsl::select_support_mcl<1>(&index.ac_gt);
+    index.ac_select1 = sdsl::select_support_mcl<1>(&index.ac);
+    index.gt_select1 = sdsl::select_support_mcl<1>(&index.gt);
+    index.mask_select = sdsl::select_support_rrr<1, RRR_BLOCK_SIZE>(&index.sa_transformed_mask);
+    auto gt_position = index.ac_gt_rank(index.dollar_position);
+    auto c_position = index.ac_rank(index.dollar_position - gt_position);
+    index.dollar_rank = index.dollar_position - gt_position - c_position;
+}
 
-// void init_selects(fms_index& index) {
-//     if (index.ac_gt_select == nullptr) {
-//         index.ac_gt_select = sdsl::select_support_hyb<1>(&index.ac_gt);
-//     }
-//     if (index.ac_select == nullptr) {
-//         index.ac_select = sdsl::select_support_hyb<1>(&index.ac);
-//     }
-//     if (index.gt_select == nullptr) {
-//         index.gt_select = sdsl::select_support_hyb<1>(&index.gt);
-//     }
-//     if (index.mask_select == nullptr) {
-//         index.mask_select = sdsl::select_support_rrr<1>(&index.sa_transformed_mask);
-//     }
-// }
+void destroy_selects(fms_index& index) {
+    index.ac_gt_select0 = sdsl::select_support_mcl<0>();
+    index.ac_select0 = sdsl::select_support_mcl<0>();
+    index.gt_select0 = sdsl::select_support_mcl<0>();
+    index.ac_gt_select1 = sdsl::select_support_mcl<1>();
+    index.ac_select1 = sdsl::select_support_mcl<1>();
+    index.gt_select1 = sdsl::select_support_mcl<1>();
+    index.mask_select = sdsl::select_support_rrr<1, RRR_BLOCK_SIZE>();
+}
