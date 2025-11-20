@@ -36,7 +36,7 @@ void fmsi_construct_access_support(fms_index& index) {
  * Removes a support for kmer access queries to save space.
  * Decreases space by at most 0.8 bits / superstring char.
  */
-void fmsi_construct_access_support(fms_index& index) {
+void fmsi_deconstruct_access_support(fms_index& index) {
     destroy_selects(index);
 }
 
