@@ -8,6 +8,8 @@
 #include <sdsl/rank_support_v.hpp>
 #include <sdsl/rank_support.hpp>
 #include "QSufSort.h"
+#include "libsais/libsais.h"
+#include "libsais/libsais64.h"
 #include "functions.h"
 #include "kmers.h"
 #include <iostream>
@@ -354,8 +356,8 @@ inline T obtain_kmer(std::vector<T> &kmers, std::string &ms, size_t i, int kmer_
     return kmer;
 }
 
-template <typename T>
-sdsl::bit_vector construct_klcp(qsint_t *sa, std::string& ms, size_t k_minus_1) {
+template <typename T, typename sa_t>
+sdsl::bit_vector construct_klcp(const sa_t *sa, std::string& ms, size_t k_minus_1) {
     int kmer_sparsity = 4;
     std::vector<T> kmers ((ms.size() - k_minus_1 + 1) / kmer_sparsity + 1);
     T kmer = 0;
@@ -374,9 +376,9 @@ sdsl::bit_vector construct_klcp(qsint_t *sa, std::string& ms, size_t k_minus_1) 
     }
     sdsl::bit_vector klcp (ms.size() + 1, 0);
     for (size_t i = 0; i < ms.size(); ++i) {
-        qsint_t sa_i = sa[i];
-        qsint_t sa_i1 = sa[i+1];
-        if ((size_t)sa_i > ms.size() - k_minus_1 || (size_t)sa_i1 > ms.size() - k_minus_1) {
+        size_t sa_i = sa[i];
+        size_t sa_i1 = sa[i+1];
+        if (sa_i > ms.size() - k_minus_1 || sa_i1 > ms.size() - k_minus_1) {
             continue;
         }
         klcp[i] = obtain_kmer(kmers, ms, sa_i, kmer_sparsity, mask, k_minus_1) == obtain_kmer(kmers, ms, sa_i1, kmer_sparsity, mask, k_minus_1);
@@ -386,7 +388,7 @@ sdsl::bit_vector construct_klcp(qsint_t *sa, std::string& ms, size_t k_minus_1) 
 
 
 
-qsint_t* convert_superstring(std::string ms) {
+qsint_t* convert_superstring(const std::string &ms) {
     auto ret = new qsint_t[ms.size() + 1];
     for (size_t i = 0; i < ms.size(); ++i) {
         ret[i] = nucleotideToInt[(uint8_t)ms[i]];
@@ -394,36 +396,93 @@ qsint_t* convert_superstring(std::string ms) {
     return ret;
 }
 
-template <typename T>
-fms_index construct(std::string &ms, int k, bool use_klcp) {
+/// The masked Burrows-Wheeler transform in a plain form, from which the indexes are built.
+struct mbwt {
+    std::vector<byte> bwt;
+    sdsl::bit_vector sa_transformed_mask;
+    sdsl::bit_vector klcp;
+    size_t dollar_position = 0;
+};
+
+/// Suffix array of the superstring, including the empty suffix, by QSufSort (16 bytes per character).
+std::vector<qsint_t> suffix_array_qsufsort(const std::string &ms) {
     qsint_t *qms = convert_superstring(ms);
-    auto sa = new qsint_t[ms.size() + 1];
-    QSufSortSuffixSort(qms, sa, (qsint_t)ms.size(),3, 0, 0);
-    QSufSortGenerateSaFromInverse(qms, sa, (qsint_t)ms.size());
+    std::vector<qsint_t> sa(ms.size() + 1);
+    QSufSortSuffixSort(qms, sa.data(), (qsint_t)ms.size(),3, 0, 0);
+    QSufSortGenerateSaFromInverse(qms, sa.data(), (qsint_t)ms.size());
     delete[] qms;
+    return sa;
+}
 
-    fms_index index;
+/// Suffix array of the superstring, including the empty suffix, by libsais
+/// (5 bytes per character with 32-bit integers, 9 bytes with 64-bit ones).
+template <typename sa_t>
+std::vector<sa_t> suffix_array_libsais(const std::string &ms) {
+    std::vector<uint8_t> codes(ms.size());
+    for (size_t i = 0; i < ms.size(); ++i) {
+        codes[i] = nucleotideToInt[(uint8_t)ms[i]];
+    }
+    std::vector<sa_t> sa(ms.size() + 1);
+    sa[0] = (sa_t)ms.size();
+    int64_t status;
+    if constexpr (sizeof(sa_t) == 4) {
+        status = libsais(codes.data(), sa.data() + 1, (int32_t)ms.size(), 0, nullptr);
+    } else {
+        status = libsais64(codes.data(), sa.data() + 1, (int64_t)ms.size(), 0, nullptr);
+    }
+    if (status != 0) {
+        throw std::runtime_error("libsais failed to construct the suffix array");
+    }
+    return sa;
+}
 
+template <typename T, typename sa_t>
+mbwt mbwt_from_suffix_array(std::string &ms, const sa_t *sa, int k, bool use_klcp) {
+    mbwt result;
     if (use_klcp) {
-        index.klcp = construct_klcp<T>(sa, ms, k-1);
+        result.klcp = construct_klcp<T, sa_t>(sa, ms, k-1);
     }
 
-    sdsl::bit_vector sa_transformed_mask(ms.size() + 1);
-    std::vector<byte> bwt (ms.size() + 1);
+    result.sa_transformed_mask = sdsl::bit_vector(ms.size() + 1);
+    result.bwt.resize(ms.size() + 1);
     for (size_t i = 0; i <= ms.size(); ++i) {
-        if (sa[i] == 0) {
-            index.dollar_position = i;
+        size_t sa_i = sa[i];
+        if (sa_i == 0) {
+            result.dollar_position = i;
         } else {
-            bwt[i] = nucleotideToInt[(uint8_t)ms[sa[i] - 1]];
+            result.bwt[i] = nucleotideToInt[(uint8_t)ms[sa_i - 1]];
         }
-        if (sa[i] != (qsint_t)ms.size()) {
-            sa_transformed_mask[i] = is_upper(ms[sa[i]]);
+        if (sa_i != ms.size()) {
+            result.sa_transformed_mask[i] = is_upper(ms[sa_i]);
         }
     }
-    delete[] sa;
-    index.sa_transformed_mask = sdsl::rrr_vector<RRR_BLOCK_SIZE>(sa_transformed_mask);
-    sa_transformed_mask.resize(0);
+    return result;
+}
 
+/// Compute the MBWT of the masked superstring; libsais is used unless QSufSort is requested.
+template <typename T>
+mbwt compute_mbwt(std::string &ms, int k, bool use_klcp, bool use_qsufsort = false) {
+    if (use_qsufsort) {
+        auto sa = suffix_array_qsufsort(ms);
+        return mbwt_from_suffix_array<T, qsint_t>(ms, sa.data(), k, use_klcp);
+    } else if (ms.size() < (size_t)INT32_MAX) {
+        auto sa = suffix_array_libsais<int32_t>(ms);
+        return mbwt_from_suffix_array<T, int32_t>(ms, sa.data(), k, use_klcp);
+    } else {
+        auto sa = suffix_array_libsais<int64_t>(ms);
+        return mbwt_from_suffix_array<T, int64_t>(ms, sa.data(), k, use_klcp);
+    }
+}
+
+/// Build the index from the MBWT, which is consumed.
+fms_index build_index(mbwt &m, int k) {
+    fms_index index;
+    index.dollar_position = m.dollar_position;
+    index.klcp = std::move(m.klcp);
+    index.sa_transformed_mask = sdsl::rrr_vector<RRR_BLOCK_SIZE>(m.sa_transformed_mask);
+    m.sa_transformed_mask.resize(0);
+
+    auto &bwt = m.bwt;
     index.ac_gt = sdsl::bit_vector(bwt.size());
     size_t gt_count = 0;
     for (size_t i = 0; i < bwt.size(); ++i) {
@@ -457,6 +516,12 @@ fms_index construct(std::string &ms, int k, bool use_klcp) {
     index.k = k;
 
     return index;
+}
+
+template <typename T>
+fms_index construct(std::string &ms, int k, bool use_klcp, bool use_qsufsort = false) {
+    mbwt m = compute_mbwt<T>(ms, k, use_klcp, use_qsufsort);
+    return build_index(m, k);
 }
 
 std::string export_ms(const fms_index& index) {

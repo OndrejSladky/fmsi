@@ -137,6 +137,30 @@ For each line of lookup queries, FMSI outputs an identifier and a comma-separate
 K-mers that are not present in the index are marked with -1.
 
 
+### FMSI 2 prototype (experimental)
+
+The commands `index2`, `query2` and `lookup2` are a prototype of a faster index over the same masked Burrows-Wheeler transform.
+They do not replace the stable commands yet and use their own index file (`<prefix>.fmsi2`).
+
+```
+./fmsi index2 ms.fa                           # or: -m rrr for the smaller, slower mask encoding
+./fmsi query2 -q queries.fa ms.fa             # membership of each k-mer, as `fmsi query`
+./fmsi lookup2 -q queries.fa ms.fa            # hashes of the k-mers, as `fmsi lookup`
+./fmsi query2 -S -t 8 -q reads.fa ms.fa       # streamed queries on 8 threads
+```
+
+The differences from the stable index:
+
+- The BWT is stored as 2-bit characters with the rank counts in the same cache line (2.29 bits per superstring character), so a rank touches one cache line instead of a wavelet tree over three bitvectors.
+- The mask is a plain bitvector with in-line rank counts (`-m plain`, 1.03 bits per character) or the RRR vector of the stable index (`-m rrr`).
+- `-b INT` k-mers (or sequences with `-S`) are searched at the same time, each step prefetching the cache lines of the next one.
+- The SA intervals of all strings of length `-p INT` are tabulated when the index is loaded.
+- `-S` streams without a kLCP array: the match of a k-mer is extended to the next k-mer and may get longer than k; when it cannot be extended, the k-mers containing the missing substring are skipped.
+- A k-mer is represented if the k-mer or its reverse complement has a set occurrence (the `or` semantics), so the same index answers membership queries for any mask and lookup queries for masks with the minimum number of ones. The `-O` and `-f` options are not available.
+- K-mers with invalid characters are reported as absent, one value per k-mer of the sequence.
+
+Suffix arrays are constructed by [libsais](https://github.com/IlyaGrebnov/libsais) (also in `fmsi index`; `-Q` selects the original QSufSort).
+
 ### k-mer set operations (experimental)
 
 #### Basic: k-mer set operations managed by FMSI
@@ -183,6 +207,7 @@ The recognized commands are:
 - `index` Creates a BWT based index of the given masked superstring.
 - `query` Queries a $k$-mer against an index.
 - `export` Export the underlying masked superstring.
+- `index2`, `query2`, `lookup2` Prototype of a faster index (see above).
 - `union` Performs union on two indexes. Expects or-MS.
 - `inter` Performs intersection on two indexes. Expects or-MS.
 - `diff`  Performs set difference on two indexes. Expects or-MS.

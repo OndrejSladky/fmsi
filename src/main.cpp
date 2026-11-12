@@ -2,6 +2,7 @@
 #include <sdsl/suffix_arrays.hpp>
 
 #include "fms_index.h"
+#include "fms_index2.h"
 #include "parser.h"
 #include "version.h"
 #include "compact.h"
@@ -12,6 +13,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <math.h>
+#include <thread>
 
 static int usage() {
   std::cerr << std::endl;
@@ -24,6 +26,10 @@ static int usage() {
   std::cerr << "    query   - Queries k-mers against an index." << std::endl;
   std::cerr << "    lookup  - Return unique hashes of present k-mers." << std::endl;
   std::cerr << "    export  - Print the underlying masked superstring to stdout." << std::endl << std::endl;
+  std::cerr << "Command (FMSI 2 prototype):" << std::endl;
+  std::cerr << "    index2  - Creates an index with a cache-friendly layout." << std::endl;
+  std::cerr << "    query2  - Queries k-mers against an index2 index in batches." << std::endl;
+  std::cerr << "    lookup2 - Return unique hashes of present k-mers using an index2 index." << std::endl << std::endl;
   std::cerr << "Command (experimental, using f-MS framework):" << std::endl;
   std::cerr << "    union   - Compute union of k-mers from several indices." << std::endl;
   std::cerr << "    inter   - Compute intersection of k-mers from several indices." << std::endl;
@@ -41,6 +47,8 @@ static int usage_index() {
   std::cerr << "    -k INT  - size of k-mers [recommended, default: number of mask trailing zeros - 1]"
             << std::endl;
   std::cerr << "    -x      - do not compute the kLCP array used for faster streaming queries."
+            << std::endl;
+  std::cerr << "    -Q      - construct the suffix array by QSufSort instead of libsais."
             << std::endl << std::endl;
   std::cerr << "Note: `fmsi index` accepts only masked superstrings - these can be computed e.g. by KmerCamel from any FASTA file." << std::endl << std::endl;
   return 1;
@@ -181,7 +189,8 @@ int ms_index(int argc, char *argv[]) {
 
   int k = 0;
   bool no_streaming = false;
-  while ((c = getopt(argc, argv, "hk:x")) >= 0) {
+  bool use_qsufsort = false;
+  while ((c = getopt(argc, argv, "hk:xQ")) >= 0) {
     switch (c) {
     case 'h':
       usage = true;
@@ -191,6 +200,9 @@ int ms_index(int argc, char *argv[]) {
       break;
     case 'x':
       no_streaming = true;
+      break;
+    case 'Q':
+      use_qsufsort = true;
       break;
     default:
       return usage_index();
@@ -227,8 +239,8 @@ int ms_index(int argc, char *argv[]) {
       no_streaming = true;
   }
   fms_index index;
-  if (k <= 32) index = construct<uint64_t>(ms, k, !no_streaming);
-  else index = construct<__uint128_t>(ms, k, !no_streaming);
+  if (k <= 32) index = construct<uint64_t>(ms, k, !no_streaming, use_qsufsort);
+  else index = construct<__uint128_t>(ms, k, !no_streaming, use_qsufsort);
   std::cerr << "Constructed index" << std::endl;
   dump_index(index, fn);
   std::cerr << "Written index" << std::endl;
@@ -372,6 +384,291 @@ int ms_query(int argc, char *argv[], bool output_orders) {
     std::cout << "\n";
   }
   return 0;
+}
+
+static int usage_index2() {
+  std::cerr << std::endl;
+  std::cerr << "Usage:   fmsi index2 [options] <masked-superstring-input>" << std::endl << std::endl;
+  std::cerr << "Options:" << std::endl;
+  std::cerr << "    -k INT  - size of k-mers [default: number of mask trailing zeros - 1]" << std::endl;
+  std::cerr << "    -m STR  - encoding of the mask: plain (fast) or rrr (small) [default: plain]" << std::endl;
+  std::cerr << "    -o STR  - prefix of the index file [default: path to the masked superstring]" << std::endl;
+  std::cerr << "    -Q      - construct the suffix array by QSufSort instead of libsais." << std::endl << std::endl;
+  std::cerr << "The index is written to <prefix>.fmsi2." << std::endl << std::endl;
+  return 1;
+}
+
+static int usage_query2(bool lookup) {
+  std::cerr << std::endl;
+  std::cerr << "Usage:   fmsi " << (lookup ? "lookup2" : "query2") << " [options] <index-prefix>" << std::endl << std::endl;
+  std::cerr << "Options:" << std::endl;
+  std::cerr << "  -q FILE - Path to FASTA/FASTQ with queries [default: stdin]" << std::endl;
+  std::cerr << "  -k INT  - Size of k-mers [default: infer automatically from index]" << std::endl;
+  std::cerr << "  -S      - Streamed queries: search the k-mers of a sequence by extending the match of the previous one" << std::endl;
+  std::cerr << "  -b INT  - Number of k-mers (or sequences if -S) searched at the same time; 1 turns batching off [default: 32]" << std::endl;
+  std::cerr << "  -p INT  - Length of the patterns with tabulated SA intervals; 0 turns the table off [default: 10]" << std::endl;
+  std::cerr << "  -t INT  - Number of threads [default: 1]" << std::endl;
+  std::cerr << std::endl;
+  return 1;
+}
+
+int ms_index2(int argc, char *argv[]) {
+  int c;
+  bool usage = false;
+  std::string fn;
+
+  if (argc > 1 && std::string(argv[argc - 1]) != "-h") {
+    fn = argv[argc - 1];
+    argc--;
+  }
+
+  int k = 0;
+  bool use_qsufsort = false;
+  std::string prefix;
+  fmsi2::mask_kind mask_type = fmsi2::mask_kind::plain;
+  while ((c = getopt(argc, argv, "hk:m:o:Q")) >= 0) {
+    switch (c) {
+    case 'h':
+      usage = true;
+      break;
+    case 'k':
+      k = atoi(optarg);
+      break;
+    case 'm':
+      if (std::string(optarg) == "plain") {
+        mask_type = fmsi2::mask_kind::plain;
+      } else if (std::string(optarg) == "rrr") {
+        mask_type = fmsi2::mask_kind::rrr;
+      } else {
+        std::cerr << "ERROR: Mask encoding '" << optarg << "' not recognized." << std::endl;
+        return usage_index2();
+      }
+      break;
+    case 'o':
+      prefix = optarg;
+      break;
+    case 'Q':
+      use_qsufsort = true;
+      break;
+    default:
+      return usage_index2();
+    }
+  }
+  if (usage) {
+    usage_index2();
+    return 0;
+  } else if (fn.empty()) {
+    std::cerr << "ERROR: Path to the masked superstring is a required argument." << std::endl;
+    return usage_index2();
+  }
+  if (prefix.empty()) prefix = fn;
+
+  auto ms = read_masked_superstring(fn);
+  if (ms.size() == 0) {
+    std::cerr << "ERROR: The file '" << fn << "' does not contain a masked superstring." << std::endl;
+    return usage_index2();
+  }
+  std::cerr << "Read masked superstring of length " << ms.size() << std::endl;
+  if (k == 0) {
+    k = infer_k(ms);
+    std::cerr << "Inferred k from the masked case convention: " << k << std::endl;
+  }
+
+  mbwt m = compute_mbwt<uint64_t>(ms, k, false, use_qsufsort);
+  std::cerr << "Constructed the masked Burrows-Wheeler transform" << std::endl;
+  size_t length = ms.size();
+  ms = std::string();
+  fmsi2::index index;
+  fmsi2::build(index, m, k, mask_type);
+  fmsi2::save(index, prefix + ".fmsi2");
+  std::cerr << "Written index: BWT " << index.bwt.bytes() << " bytes (" << 8.0 * index.bwt.bytes() / length
+            << " bits per character), mask " << index.mask_bytes() << " bytes ("
+            << 8.0 * index.mask_bytes() / length << " bits per character)" << std::endl;
+  return 0;
+}
+
+template <bool hashes>
+int run_query2(const fmsi2::index &index, std::string query_fn, unsigned batch_size, bool streaming, unsigned threads,
+               fmsi2::lookup_stats &stats) {
+  typedef typename std::conditional<hashes, int64_t, int8_t>::type out_t;
+  const size_t k = index.k;
+  // Number of bases searched together; the output of a chunk is printed at once.
+  const size_t chunk_bases = (size_t)threads << 22;
+
+  gzFile fp = OpenFile(query_fn);
+  kseq_t *seq = kseq_init(fp);
+
+  struct record {
+    std::string name;
+    size_t offset, length;
+  };
+  std::string sequences;
+  std::vector<record> records;
+  std::vector<uint32_t> offsets;
+  std::vector<fmsi2::segment> segments;
+  std::vector<out_t> results;
+  std::string output;
+
+  auto flush = [&]() {
+    offsets.clear();
+    segments.clear();
+    for (auto &r : records) {
+      // Stretches of valid characters.
+      size_t valid = 0;
+      for (size_t i = 0; i <= r.length; ++i) {
+        if (i < r.length && nucleotideToInt[(uint8_t)sequences[r.offset + i]] != 4) {
+          ++valid;
+          if (valid >= k) offsets.push_back(r.offset + i + 1 - k);
+        } else {
+          if (valid >= k) segments.push_back({(uint32_t)(r.offset + i - valid), (uint32_t)valid});
+          valid = 0;
+        }
+      }
+    }
+    // K-mers with invalid characters are reported as absent.
+    results.assign(sequences.size(), hashes ? -1 : 0);
+    // The index is read-only and the results of the k-mers are disjoint, so the work is split evenly.
+    size_t total = streaming ? segments.size() : offsets.size();
+    auto search = [&](size_t begin, size_t end, fmsi2::lookup_stats &part) {
+      if (streaming) {
+        fmsi2::lookup_streaming<hashes, out_t>(index, sequences.data(), segments.data() + begin, end - begin,
+                                               results.data(), batch_size, part);
+      } else {
+        fmsi2::lookup_batch<hashes, out_t>(index, sequences.data(), offsets.data() + begin, end - begin,
+                                           results.data(), batch_size, part);
+      }
+    };
+    auto start = std::chrono::steady_clock::now();
+    std::vector<fmsi2::lookup_stats> parts(threads);
+    std::vector<std::thread> workers;
+    for (unsigned t = 1; t < threads; ++t) {
+      workers.emplace_back(search, total * t / threads, total * (t + 1) / threads, std::ref(parts[t]));
+    }
+    search(0, total / threads, parts[0]);
+    for (auto &worker : workers) worker.join();
+    for (auto &part : parts) stats.add(part);
+    stats.seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    output.clear();
+    for (auto &r : records) {
+      output += r.name;
+      output += '\t';
+      for (size_t i = 0; i + k <= r.length; ++i) {
+        if (hashes) {
+          if (i > 0) output += ',';
+          output += std::to_string(results[r.offset + i]);
+        } else {
+          output += (char)('0' + results[r.offset + i]);
+        }
+      }
+      output += '\n';
+    }
+    fwrite(output.data(), 1, output.size(), stdout);
+    sequences.clear();
+    records.clear();
+  };
+
+  int64_t sequence_length;
+  while ((sequence_length = kseq_read(seq)) >= 0) {
+    if (sequences.size() + sequence_length >= UINT32_MAX) {
+      flush();
+      if ((size_t)sequence_length >= UINT32_MAX) {
+        std::cerr << "ERROR: Query sequences of 4 Gbp and more are not supported." << std::endl;
+        return 1;
+      }
+    }
+    records.push_back({seq->name.s, sequences.size(), (size_t)sequence_length});
+    sequences.append(seq->seq.s, sequence_length);
+    if (sequences.size() >= chunk_bases) flush();
+  }
+  flush();
+  kseq_destroy(seq);
+  gzclose(fp);
+  return 0;
+}
+
+int ms_query2(int argc, char *argv[], bool output_orders) {
+  bool usage = false;
+  int c;
+  int k = 0;
+  std::string fn;
+
+  if (argc > 1 && std::string(argv[argc - 1]) != "-h") {
+    fn = argv[argc - 1];
+    argc--;
+  }
+
+  std::string query_fn = "-";
+  int batch_size = 32;
+  int prefix_length = 10;
+  bool streaming = false;
+  int threads = 1;
+  while ((c = getopt(argc, argv, "hq:k:b:p:St:")) >= 0) {
+    switch (c) {
+    case 'h':
+      usage = true;
+      break;
+    case 'q':
+      query_fn = optarg;
+      break;
+    case 'k':
+      k = atoi(optarg);
+      break;
+    case 'S':
+      streaming = true;
+      break;
+    case 't':
+      threads = atoi(optarg);
+      break;
+    case 'b':
+      batch_size = atoi(optarg);
+      break;
+    case 'p':
+      prefix_length = atoi(optarg);
+      break;
+    default:
+      return usage_query2(output_orders);
+    }
+  }
+  if (usage) {
+    usage_query2(output_orders);
+    return 0;
+  } else if (fn.empty()) {
+    std::cerr << "ERROR: Prefix of the index is a required argument." << std::endl;
+    return usage_query2(output_orders);
+  } else if (batch_size < 1 || threads < 1 || prefix_length < 0 || prefix_length > 14) {
+    std::cerr << "ERROR: The batch size and the number of threads must be positive and the table pattern length between 0 and 14." << std::endl;
+    return usage_query2(output_orders);
+  }
+
+  auto start = std::chrono::steady_clock::now();
+  auto seconds_since_start = [&]() {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+  };
+
+  fmsi2::index index;
+  fmsi2::load(index, fn + ".fmsi2");
+  if (k != 0 && k != (int)index.k) {
+    std::cerr << "ERROR: Mismatch. Provided k (" << k << ") does not match the k of the index (" << index.k << ")." << std::endl;
+    return usage_query2(output_orders);
+  }
+  double load_seconds = seconds_since_start();
+  fmsi2::build_prefix_table(index, prefix_length);
+  double table_seconds = seconds_since_start() - load_seconds;
+
+  fmsi2::lookup_stats stats;
+  int ret = output_orders ? run_query2<true>(index, query_fn, batch_size, streaming, threads, stats)
+                          : run_query2<false>(index, query_fn, batch_size, streaming, threads, stats);
+  fflush(stdout);
+
+  std::cerr << "[fmsi2]"
+            << "\tkmers=" << stats.kmers << "\tfound=" << stats.found
+            << "\tsteps_per_kmer=" << (stats.kmers ? (double)stats.steps / stats.kmers : 0)
+            << "\tsearches=" << stats.searches << "\trechecks=" << stats.rechecks
+            << "\tload_s=" << load_seconds << "\ttable_s=" << table_seconds
+            << "\tsearch_s=" << stats.seconds
+            << "\tsearch_ns_per_kmer=" << (stats.kmers ? 1e9 * stats.seconds / stats.kmers : 0)
+            << "\ttotal_s=" << seconds_since_start() << std::endl;
+  return ret;
 }
 
 int ms_merge(int argc, char *argv[]) {
@@ -676,6 +973,12 @@ int main(int argc, char *argv[]) {
     ret = ms_query(argc - 1, argv + 1, false);
   else if (op == "lookup")
     ret = ms_query(argc - 1, argv + 1, true);
+  else if (op == "index2")
+    ret = ms_index2(argc - 1, argv + 1);
+  else if (op == "query2")
+    ret = ms_query2(argc - 1, argv + 1, false);
+  else if (op == "lookup2")
+    ret = ms_query2(argc - 1, argv + 1, true);
   else if (op == "clean")
     ret = ms_clean(argc - 1, argv + 1);
   else if (op == "merge")
