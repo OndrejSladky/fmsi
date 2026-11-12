@@ -392,6 +392,7 @@ static int usage_index2() {
   std::cerr << "Options:" << std::endl;
   std::cerr << "    -k INT  - size of k-mers [default: number of mask trailing zeros - 1]" << std::endl;
   std::cerr << "    -m STR  - encoding of the mask: plain (the fastest), packed (smaller), or rrr (the smallest, slow) [default: plain]" << std::endl;
+  std::cerr << "    -c INT  - bytes per block of the BWT: 64 (the fastest), 128 or 256 (the smallest) [default: 64]" << std::endl;
   std::cerr << "    -o STR  - prefix of the index file [default: path to the masked superstring]" << std::endl;
   std::cerr << "    -Q      - construct the suffix array by QSufSort instead of libsais." << std::endl << std::endl;
   std::cerr << "The index is written to <prefix>.fmsi2." << std::endl << std::endl;
@@ -426,13 +427,21 @@ int ms_index2(int argc, char *argv[]) {
   bool use_qsufsort = false;
   std::string prefix;
   fmsi2::mask_kind mask_type = fmsi2::mask_kind::plain;
-  while ((c = getopt(argc, argv, "hk:m:o:Q")) >= 0) {
+  int block_bytes = 64;
+  while ((c = getopt(argc, argv, "hk:m:c:o:Q")) >= 0) {
     switch (c) {
     case 'h':
       usage = true;
       break;
     case 'k':
       k = atoi(optarg);
+      break;
+    case 'c':
+      block_bytes = atoi(optarg);
+      if (!fmsi2::quad_sequence::valid_block_bytes(block_bytes)) {
+        std::cerr << "ERROR: The blocks of the BWT can have 64, 128 or 256 bytes." << std::endl;
+        return usage_index2();
+      }
       break;
     case 'm':
       if (std::string(optarg) == "plain") {
@@ -481,7 +490,7 @@ int ms_index2(int argc, char *argv[]) {
   size_t length = ms.size();
   ms = std::string();
   fmsi2::index index;
-  fmsi2::build(index, m, k, mask_type);
+  fmsi2::build(index, m, k, mask_type, block_bytes);
   fmsi2::save(index, prefix + ".fmsi2");
   std::cerr << "Written index: BWT " << index.bwt.bytes() << " bytes (" << 8.0 * index.bwt.bytes() / length
             << " bits per character), mask " << index.mask_bytes() << " bytes ("

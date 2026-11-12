@@ -109,11 +109,13 @@ queries make_queries(std::mt19937_64 &rng, const std::string &ms, size_t k) {
     return result;
 }
 
-TEST(RANK2, QUAD_RANK) {
+template <size_t BYTES>
+void test_quad_rank() {
     std::mt19937_64 rng(1);
-    for (size_t size : {0, 1, 223, 224, 225, 4000, 57344, 57345, 130000}) {
+    const size_t block = fmsi2::quad_rank<BYTES>::BLOCK_SYMBOLS, super = block * fmsi2::quad_rank<BYTES>::SUPER_BLOCKS;
+    for (size_t size : {(size_t)0, (size_t)1, block - 1, block, block + 1, 9 * block + 5, super, super + 1, 2 * super + 77}) {
         std::vector<uint8_t> symbols(size);
-        fmsi2::quad_rank ranks(size);
+        fmsi2::quad_rank<BYTES> ranks(size);
         for (size_t i = 0; i < size; ++i) {
             symbols[i] = rng() % 4;
             ranks.set(i, symbols[i]);
@@ -122,7 +124,7 @@ TEST(RANK2, QUAD_RANK) {
         size_t counts[4] = {0, 0, 0, 0};
         for (size_t i = 0; i <= size; ++i) {
             for (int c = 0; c < 4; ++c) ASSERT_EQ(ranks.rank(i, c), counts[c]) << "size " << size << " position " << i;
-            for (size_t distance : {0, 1, 2, 30, 250}) {
+            for (size_t distance : {0, 1, 2, 30, 250, 1100}) {
                 if (i + distance > size) continue;
                 size_t rank_i, rank_j;
                 uint8_t c = rng() % 4;
@@ -136,6 +138,12 @@ TEST(RANK2, QUAD_RANK) {
             }
         }
     }
+}
+
+TEST(RANK2, QUAD_RANK) {
+    test_quad_rank<64>();
+    test_quad_rank<128>();
+    test_quad_rank<256>();
 }
 
 TEST(RANK2, BIT_RANK) {
@@ -217,7 +225,7 @@ TEST(FMS_INDEX2, MEMBERSHIP) {
         for (auto mask_type : {fmsi2::mask_kind::plain, fmsi2::mask_kind::packed, fmsi2::mask_kind::rrr}) {
             mbwt m = compute_mbwt<uint64_t>(ms, k, false);
             fmsi2::index index;
-            fmsi2::build(index, m, k, mask_type);
+            fmsi2::build(index, m, k, mask_type, 64 << (round % 3));
             for (unsigned table : {0, 2, 10}) {
                 fmsi2::build_prefix_table(index, table);
                 for (unsigned batch : {1, 3, 32}) {
@@ -249,7 +257,7 @@ TEST(FMS_INDEX2, HASHES) {
 
         mbwt m = compute_mbwt<uint64_t>(ms, k, false);
         fmsi2::index index;
-        fmsi2::build(index, m, k, (fmsi2::mask_kind)(round % 3));
+        fmsi2::build(index, m, k, (fmsi2::mask_kind)(round % 3), 64 << (round / 3 % 3));
         fmsi2::build_prefix_table(index, round % 3 * 4);
         fmsi2::lookup_stats stats;
         std::vector<int64_t> single(q.sequences.size(), -1), streamed(q.sequences.size(), -1);
@@ -286,7 +294,7 @@ TEST(FMS_INDEX2, SAVE_AND_LOAD) {
     for (auto mask_type : {fmsi2::mask_kind::plain, fmsi2::mask_kind::packed, fmsi2::mask_kind::rrr}) {
         mbwt m = compute_mbwt<uint64_t>(ms, k, false);
         fmsi2::index built, loaded;
-        fmsi2::build(built, m, k, mask_type);
+        fmsi2::build(built, m, k, mask_type, mask_type == fmsi2::mask_kind::plain ? 128 : 256);
         std::string path = testing::TempDir() + "fmsi2_test.fmsi2";
         fmsi2::save(built, path);
         fmsi2::load(loaded, path);

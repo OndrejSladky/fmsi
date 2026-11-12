@@ -4,8 +4,8 @@
 // layout, searched in batches with prefetching.
 //
 // Differences from the original index (fms_index.h):
-//  - the BWT is stored as 2-bit symbols with in-line rank counts (one cache
-//    line per rank instead of a wavelet tree over three bitvectors),
+//  - the BWT is stored as 2-bit symbols with in-line rank counts (one block of
+//    64 to 256 bytes per rank instead of a wavelet tree over three bitvectors),
 //  - the SA-transformed mask is a plain bitvector with in-line rank counts, a
 //    Tunstall-coded bitvector (smaller, one cache line per access as well),
 //    or the original RRR vector,
@@ -39,7 +39,7 @@ struct index {
     uint64_t size = 0;
     uint64_t dollar_position = 0;
     uint64_t counts[4] = {0, 0, 0, 0};
-    quad_rank bwt;
+    quad_sequence bwt;
     mask_kind mask_type = mask_kind::plain;
     bit_rank mask;
     tunstall_bits mask_packed;
@@ -121,12 +121,12 @@ inline void update_range(const index &ix, size_t &i, size_t &j, byte c) {
 }
 
 /// Build the index from the MBWT, which is consumed.
-void build(index &ix, mbwt &m, int k, mask_kind mask_type) {
+void build(index &ix, mbwt &m, int k, mask_kind mask_type, uint32_t bwt_block_bytes = 64) {
     ix.k = k;
     ix.size = m.bwt.size();
     ix.dollar_position = m.dollar_position;
 
-    ix.bwt = quad_rank(m.bwt.size());
+    ix.bwt = quad_sequence(m.bwt.size(), bwt_block_bytes);
     uint64_t totals[4] = {0, 0, 0, 0};
     for (size_t i = 0; i < m.bwt.size(); ++i) {
         ix.bwt.set(i, m.bwt[i]);
@@ -157,7 +157,7 @@ void build(index &ix, mbwt &m, int k, mask_kind mask_type) {
 }
 
 static const char MAGIC[8] = {'F', 'M', 'S', 'I', '2', 'I', 'D', 'X'};
-static const uint32_t FORMAT_VERSION = 1;
+static const uint32_t FORMAT_VERSION = 2;
 
 void save(const index &ix, const std::string &path) {
     std::ofstream out(path, std::ios::binary);

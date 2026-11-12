@@ -14,6 +14,8 @@
 #include <cstring>
 #include <iostream>
 #include <new>
+#include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 // FMSI2_SCALAR selects the portable code also on ARM (for testing).
@@ -24,7 +26,7 @@
 
 namespace fmsi2 {
 
-/// A zero-initialized heap array aligned to cache lines.
+/// A zero-initialized heap array aligned to 256 bytes (the largest block, and a multiple of a cache line).
 template <typename T>
 class aligned_array {
     T *data_ = nullptr;
@@ -57,7 +59,7 @@ class aligned_array {
         size_ = size;
         if (size == 0) return;
         void *memory = nullptr;
-        if (posix_memalign(&memory, 64, size * sizeof(T)) != 0) throw std::bad_alloc();
+        if (posix_memalign(&memory, 256, size * sizeof(T)) != 0) throw std::bad_alloc();
         memset(memory, 0, size * sizeof(T));
         data_ = static_cast<T *>(memory);
     }
@@ -86,44 +88,98 @@ inline uint64_t low_bits(int bits) {
     return (1ULL << bits) - 1;
 }
 
-/// One cache line of 2-bit symbols: 4 counts of 16 bits and 224 symbols.
-struct alignas(64) quad_block {
-    /// Occurrences of each symbol before this block, relative to the superblock.
-    uint16_t counts[4];
-    /// Symbol t is stored at bits [2t % 64, 2t % 64 + 2) of words[t / 32].
-    uint64_t words[7];
-};
-static_assert(sizeof(quad_block) == 64, "quad_block must be one cache line");
-
-/// Rank over a sequence of 2-bit symbols; 2.29 bits per symbol.
+/// Rank over a sequence of 2-bit symbols in blocks of BYTES bytes: 64 (2.29 bits per symbol), 128 (2.13)
+/// or 256 (2.06).
+///
+/// A block holds 4 * (BYTES - 8) symbols and, in its middle, the numbers of occurrences of the four
+/// symbols before the middle (16 bits each, relative to the superblock). A rank counts from the middle
+/// to the position, so it scans at most half of the block, and touches only the cache lines between the
+/// position and the counts: one line of a 64-byte block, 1.5 lines of a 128-byte block on average and 2
+/// of a 256-byte one.
+///
+/// Layout: BYTES / 2 - 8 bytes of symbols (the left half), 8 bytes of counts, BYTES / 2 bytes of symbols
+/// (the right half). Symbol t of the block is in byte t / 4 (left half) or 8 + t / 4 (right half), at
+/// bits 2 * (t % 4).
+template <size_t BYTES>
 class quad_rank {
   public:
-    static constexpr size_t BLOCK_SYMBOLS = 224;
-    /// 256 blocks hold 57,344 symbols, so the relative counts fit into 16 bits.
-    static constexpr size_t SUPER_BLOCKS = 256;
+    static constexpr size_t BLOCK_BYTES = BYTES;
+    static constexpr size_t BLOCK_SYMBOLS = 4 * (BYTES - 8);
+    /// Number of symbols of the left half, and the byte of the counts.
+    static constexpr size_t LEFT_SYMBOLS = 4 * (BYTES / 2 - 8);
+    static constexpr size_t COUNTS_BYTE = BYTES / 2 - 8;
+    /// A superblock has less than 2^16 symbols, so that the relative counts fit into 16 bits.
+    static constexpr size_t SUPER_BLOCKS = BYTES <= 64 ? 256 : BYTES <= 128 ? 128 : 64;
 
   private:
-    static constexpr uint64_t LOW_BITS_OF_PAIRS = 0x5555555555555555ULL;
+    struct alignas(64) block_t {
+        uint8_t bytes[BYTES];
+    };
+    static_assert(sizeof(block_t) == BYTES && BYTES % 64 == 0, "blocks must be whole cache lines");
+    static_assert(SUPER_BLOCKS * BLOCK_SYMBOLS < 65536 && BYTES <= 256, "counts must fit");
 
     struct super_block {
         uint64_t counts[4];
     };
 
-    /// Byte masks selecting the first r symbols of a block, and no byte of its counts.
-    struct limit_table {
-        alignas(64) uint8_t masks[BLOCK_SYMBOLS][64];
-        limit_table() {
-            memset(masks, 0, sizeof(masks));
-            for (size_t r = 0; r < BLOCK_SYMBOLS; ++r) {
-                for (size_t bit = 0; bit < 2 * r; ++bit) masks[r][8 + bit / 8] |= 1 << (bit % 8);
-            }
+    /// The offsets 0, ..., BYTES / 2 - 1 of the bytes of a half.
+    struct offset_table {
+        alignas(64) uint8_t offsets[BYTES / 2];
+        offset_table() {
+            for (size_t byte = 0; byte < BYTES / 2; ++byte) offsets[byte] = (uint8_t)byte;
         }
     };
-    static inline const limit_table LIMITS{};
+    static inline const offset_table HALF{};
 
     size_t size_ = 0;
-    aligned_array<quad_block> blocks_;
+    aligned_array<block_t> blocks_;
     std::vector<super_block> supers_;
+
+    static inline size_t byte_of(size_t r) { return r / 4 + (r >= LEFT_SYMBOLS ? 8 : 0); }
+
+    static inline uint16_t count_before_middle(const block_t &block, uint8_t c) {
+        uint16_t count;
+        memcpy(&count, block.bytes + COUNTS_BYTE + 2 * c, 2);
+        return count;
+    }
+
+    /// The bits 2t of the byte are set for its symbols equal to c.
+    static inline uint8_t matches(uint8_t byte, uint8_t c) {
+        uint8_t x = byte ^ (uint8_t)(0x55 * (c ^ 3));
+        return x & (x >> 1) & 0x55;
+    }
+
+    /// Number of occurrences of c among the first r symbols of the block, relative to its middle
+    /// (negative in the left half). Branch-free on purpose: the position in the block is unpredictable.
+    static inline int64_t count_from_middle(const block_t &block, size_t r, uint8_t c) {
+        const bool right = r >= LEFT_SYMBOLS;
+        // The half is scanned as BYTES / 2 bytes starting at [base]; in the left half, these include the
+        // counts, which are never selected. The selected bytes are [first, first + selected) of them: from
+        // the byte with symbol r to the middle (left), or from the middle to the byte with symbol r (right).
+        const uint8_t *base = block.bytes + (right ? BYTES / 2 : 0);
+        const size_t first = right ? 0 : r / 4;
+        const size_t selected = right ? (r - LEFT_SYMBOLS) / 4 : COUNTS_BYTE - r / 4;
+        int64_t sum;
+#ifdef FMSI2_NEON
+        const uint8x16_t pattern = vdupq_n_u8(0x55 * (c ^ 3)), pairs = vdupq_n_u8(0x55);
+        const uint8x16_t first_byte = vdupq_n_u8(first), selected_bytes = vdupq_n_u8(selected);
+        uint8x16_t sums = vdupq_n_u8(0);
+        for (size_t v = 0; v < BYTES / 32; ++v) {
+            uint8x16_t x = veorq_u8(vld1q_u8(base + 16 * v), pattern);
+            uint8x16_t ones = vcntq_u8(vandq_u8(vandq_u8(x, vshrq_n_u8(x, 1)), pairs));
+            uint8x16_t in_range = vcltq_u8(vsubq_u8(vld1q_u8(HALF.offsets + 16 * v), first_byte), selected_bytes);
+            sums = vaddq_u8(sums, vandq_u8(ones, in_range));
+        }
+        sum = vaddlvq_u8(sums);
+#else
+        sum = 0;
+        for (size_t byte = first; byte < first + selected; ++byte) sum += __builtin_popcount(matches(base[byte], c));
+#endif
+        // The symbols before position r in its byte: counted above in the left half, missing in the right one.
+        uint8_t partial = matches(block.bytes[byte_of(r)], c) & ((1u << (2 * (r % 4))) - 1);
+        int64_t before = (partial & 1) + ((partial >> 2) & 1) + ((partial >> 4) & 1);
+        return right ? sum + before : before - sum;
+    }
 
   public:
     quad_rank() = default;
@@ -131,14 +187,12 @@ class quad_rank {
 
     size_t size() const { return size_; }
 
-    size_t bytes() const {
-        return blocks_.size() * sizeof(quad_block) + supers_.size() * sizeof(super_block);
-    }
+    size_t bytes() const { return blocks_.size() * sizeof(block_t) + supers_.size() * sizeof(super_block); }
 
     /// Set symbol i; valid only before finalize() and only once per position.
     void set(size_t i, uint8_t c) {
         size_t r = i % BLOCK_SYMBOLS;
-        blocks_[i / BLOCK_SYMBOLS].words[r / 32] |= (uint64_t)c << (2 * (r % 32));
+        blocks_[i / BLOCK_SYMBOLS].bytes[byte_of(r)] |= c << (2 * (r % 4));
     }
 
     /// Compute the rank counts; to be called once after all symbols are set.
@@ -150,99 +204,50 @@ class quad_rank {
             if (b % SUPER_BLOCKS == 0) {
                 for (int c = 0; c < 4; ++c) super.counts[c] = totals[c];
             }
-            for (int c = 0; c < 4; ++c) {
-                blocks_[b].counts[c] = (uint16_t)(totals[c] - super.counts[c]);
-            }
-            for (int w = 0; w < 7; ++w) {
-                for (int c = 0; c < 4; ++c) {
-                    totals[c] += __builtin_popcountll(matches(blocks_[b].words[w], c));
+            for (size_t r = 0; r < BLOCK_SYMBOLS; ++r) {
+                if (r == LEFT_SYMBOLS) {
+                    for (int c = 0; c < 4; ++c) {
+                        uint16_t count = (uint16_t)(totals[c] - super.counts[c]);
+                        memcpy(blocks_[b].bytes + COUNTS_BYTE + 2 * c, &count, 2);
+                    }
                 }
+                totals[(blocks_[b].bytes[byte_of(r)] >> (2 * (r % 4))) & 3]++;
             }
         }
-    }
-
-    /// The bits 2t are set for the symbols t of the word that are equal to c.
-    static inline uint64_t matches(uint64_t word, uint8_t c) {
-        uint64_t x = word ^ (LOW_BITS_OF_PAIRS * (uint64_t)(c ^ 3));
-        return x & (x >> 1) & LOW_BITS_OF_PAIRS;
     }
 
     inline uint8_t operator[](size_t i) const {
         size_t r = i % BLOCK_SYMBOLS;
-        return (blocks_[i / BLOCK_SYMBOLS].words[r / 32] >> (2 * (r % 32))) & 3;
+        return (blocks_[i / BLOCK_SYMBOLS].bytes[byte_of(r)] >> (2 * (r % 4))) & 3;
     }
 
-    inline void prefetch(size_t i) const { __builtin_prefetch(&blocks_[i / BLOCK_SYMBOLS]); }
+    /// Prefetch the cache lines read by rank(i, c): those from the position to the counts.
+    inline void prefetch(size_t i) const {
+        const uint8_t *block = blocks_[i / BLOCK_SYMBOLS].bytes;
+        size_t line = byte_of(i % BLOCK_SYMBOLS) / 64, counts_line = COUNTS_BYTE / 64;
+        __builtin_prefetch(block + 64 * counts_line);
+        if (BYTES > 64) __builtin_prefetch(block + 64 * line);
+        if (BYTES > 128) __builtin_prefetch(block + 64 * ((line + counts_line + 1) / 2));
+    }
 
     /// Number of occurrences of c among the first i symbols.
     inline size_t rank(size_t i, uint8_t c) const {
         size_t b = i / BLOCK_SYMBOLS;
-        size_t r = i % BLOCK_SYMBOLS;
-        const quad_block &block = blocks_[b];
-        size_t result = supers_[b / SUPER_BLOCKS].counts[c] + block.counts[c];
-        // Branch-free on purpose: the position within the block is unpredictable.
-#ifdef FMSI2_NEON
-        uint8x16_t sum = vdupq_n_u8(0);
-        for (int v = 0; v < 4; ++v) {
-            sum = vaddq_u8(sum, vcntq_u8(vandq_u8(matches(block, v, c), vld1q_u8(LIMITS.masks[r] + 16 * v))));
-        }
-        return result + vaddlvq_u8(sum);
-#else
-        for (int w = 0; w < 7; ++w) {
-            result += __builtin_popcountll(matches(block.words[w], c) & low_bits(2 * (int)r - 64 * w));
-        }
-        return result;
-#endif
+        const block_t &block = blocks_[b];
+        return supers_[b / SUPER_BLOCKS].counts[c] + count_before_middle(block, c) +
+               count_from_middle(block, i % BLOCK_SYMBOLS, c);
     }
 
-    /// Ranks of c at the positions i <= j; cheaper than two rank queries if both fall into the same block.
+    /// Ranks of c at the positions i <= j; cheaper than two rank queries for neighbouring positions.
     inline void rank_pair(size_t i, size_t j, uint8_t c, size_t &rank_i, size_t &rank_j) const {
-        size_t b = i / BLOCK_SYMBOLS;
-        if (b != j / BLOCK_SYMBOLS) {
-            rank_i = rank(i, c);
-            rank_j = rank(j, c);
-            return;
-        }
-        if (j == i + 1) {
-            rank_i = rank(i, c);
-            rank_j = rank_i + ((*this)[i] == c);
-            return;
-        }
-        size_t ri = i % BLOCK_SYMBOLS, rj = j % BLOCK_SYMBOLS;
-        const quad_block &block = blocks_[b];
-        size_t before = supers_[b / SUPER_BLOCKS].counts[c] + block.counts[c];
-#ifdef FMSI2_NEON
-        uint8x16_t sum_i = vdupq_n_u8(0), sum_j = vdupq_n_u8(0);
-        for (int v = 0; v < 4; ++v) {
-            uint8x16_t m = matches(block, v, c);
-            sum_i = vaddq_u8(sum_i, vcntq_u8(vandq_u8(m, vld1q_u8(LIMITS.masks[ri] + 16 * v))));
-            sum_j = vaddq_u8(sum_j, vcntq_u8(vandq_u8(m, vld1q_u8(LIMITS.masks[rj] + 16 * v))));
-        }
-        rank_i = before + vaddlvq_u8(sum_i);
-        rank_j = before + vaddlvq_u8(sum_j);
-#else
-        rank_i = rank_j = before;
-        for (int w = 0; w < 7; ++w) {
-            uint64_t m = matches(block.words[w], c);
-            rank_i += __builtin_popcountll(m & low_bits(2 * (int)ri - 64 * w));
-            rank_j += __builtin_popcountll(m & low_bits(2 * (int)rj - 64 * w));
-        }
-#endif
+        rank_i = rank(i, c);
+        rank_j = j == i + 1 ? rank_i + ((*this)[i] == c) : rank(j, c);
     }
-
-#ifdef FMSI2_NEON
-    /// The bits 2t of the bytes are set for the symbols equal to c in the v-th quarter of the block.
-    static inline uint8x16_t matches(const quad_block &block, int v, uint8_t c) {
-        uint8x16_t x = veorq_u8(vld1q_u8(reinterpret_cast<const uint8_t *>(&block) + 16 * v),
-                                vdupq_n_u8(0x55 * (c ^ 3)));
-        return vandq_u8(vandq_u8(x, vshrq_n_u8(x, 1)), vdupq_n_u8(0x55));
-    }
-#endif
 
     void write(std::ostream &out) const {
         write_pod(out, (uint64_t)size_);
         write_pod(out, (uint64_t)blocks_.size());
-        out.write(reinterpret_cast<const char *>(blocks_.data()), blocks_.size() * sizeof(quad_block));
+        out.write(reinterpret_cast<const char *>(blocks_.data()), blocks_.size() * sizeof(block_t));
         write_pod(out, (uint64_t)supers_.size());
         out.write(reinterpret_cast<const char *>(supers_.data()), supers_.size() * sizeof(super_block));
     }
@@ -253,10 +258,86 @@ class quad_rank {
         read_pod(in, block_count);
         size_ = size;
         blocks_.resize(block_count);
-        in.read(reinterpret_cast<char *>(blocks_.data()), block_count * sizeof(quad_block));
+        in.read(reinterpret_cast<char *>(blocks_.data()), block_count * sizeof(block_t));
         read_pod(in, super_count);
         supers_.resize(super_count);
         in.read(reinterpret_cast<char *>(supers_.data()), super_count * sizeof(super_block));
+    }
+};
+
+/// A sequence of 2-bit symbols with rank, in blocks of 64, 128 or 256 bytes, chosen when it is built.
+/// Larger blocks have fewer counts per symbol (2.29, 2.13 and 2.06 bits per symbol), but a rank reads
+/// more cache lines and counts over more symbols.
+class quad_sequence {
+    uint32_t block_bytes_ = 64;
+    quad_rank<64> small_;
+    quad_rank<128> medium_;
+    quad_rank<256> large_;
+
+    template <typename function>
+    inline auto visit(function f) const {
+        switch (block_bytes_) {
+        case 64:
+            return f(small_);
+        case 128:
+            return f(medium_);
+        default:
+            return f(large_);
+        }
+    }
+
+    template <typename function>
+    inline auto visit(function f) {
+        switch (block_bytes_) {
+        case 64:
+            return f(small_);
+        case 128:
+            return f(medium_);
+        default:
+            return f(large_);
+        }
+    }
+
+  public:
+    quad_sequence() = default;
+
+    quad_sequence(size_t size, uint32_t block_bytes) : block_bytes_(block_bytes) {
+        visit([&](auto &ranks) { ranks = std::decay_t<decltype(ranks)>(size); });
+    }
+
+    static bool valid_block_bytes(uint32_t bytes) { return bytes == 64 || bytes == 128 || bytes == 256; }
+
+    uint32_t block_bytes() const { return block_bytes_; }
+
+    size_t bytes() const {
+        return visit([](const auto &ranks) { return ranks.bytes(); });
+    }
+
+    void set(size_t i, uint8_t c) {
+        visit([&](auto &ranks) { ranks.set(i, c); });
+    }
+
+    void finalize() {
+        visit([](auto &ranks) { ranks.finalize(); });
+    }
+
+    inline void prefetch(size_t i) const {
+        visit([&](const auto &ranks) { ranks.prefetch(i); });
+    }
+
+    inline void rank_pair(size_t i, size_t j, uint8_t c, size_t &rank_i, size_t &rank_j) const {
+        visit([&](const auto &ranks) { ranks.rank_pair(i, j, c, rank_i, rank_j); });
+    }
+
+    void write(std::ostream &out) const {
+        write_pod(out, block_bytes_);
+        visit([&](const auto &ranks) { ranks.write(out); });
+    }
+
+    void read(std::istream &in) {
+        read_pod(in, block_bytes_);
+        if (!valid_block_bytes(block_bytes_)) throw std::invalid_argument("unsupported size of the blocks of the BWT");
+        visit([&](auto &ranks) { ranks.read(in); });
     }
 };
 
