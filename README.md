@@ -143,7 +143,7 @@ The commands `index2`, `query2` and `lookup2` are a prototype of a faster index 
 They do not replace the stable commands yet and use their own index file (`<prefix>.fmsi2`).
 
 ```
-./fmsi index2 ms.fa                           # or: -m rrr for the smaller, slower mask encoding
+./fmsi index2 ms.fa                           # or: -m packed for a smaller, somewhat slower mask
 ./fmsi query2 -q queries.fa ms.fa             # membership of each k-mer, as `fmsi query`
 ./fmsi lookup2 -q queries.fa ms.fa            # hashes of the k-mers, as `fmsi lookup`
 ./fmsi query2 -S -t 8 -q reads.fa ms.fa       # streamed queries on 8 threads
@@ -152,7 +152,7 @@ They do not replace the stable commands yet and use their own index file (`<pref
 The differences from the stable index:
 
 - The BWT is stored as 2-bit characters with the rank counts in the same cache line (2.29 bits per superstring character), so a rank touches one cache line instead of a wavelet tree over three bitvectors.
-- The mask is a plain bitvector with in-line rank counts (`-m plain`, 1.03 bits per character) or the RRR vector of the stable index (`-m rrr`).
+- The mask has three encodings. `-m plain` is a bitvector with in-line rank counts (1.03 bits per character, the fastest). `-m packed` compresses it by a Tunstall code chosen for its density, 16 strings coded by 4 bits each, decoded within one cache line (0.87 bits per character for a mask with 77% of ones). `-m rrr` is the RRR vector of the stable index (0.83 bits per character, several times slower).
 - `-b INT` k-mers (or sequences with `-S`) are searched at the same time, each step prefetching the cache lines of the next one.
 - The SA intervals of all strings of length `-p INT` are tabulated when the index is loaded.
 - `-S` streams without a kLCP array: the match of a k-mer is extended to the next k-mer and may get longer than k; when it cannot be extended, the k-mers containing the missing substring are skipped.

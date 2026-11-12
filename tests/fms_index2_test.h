@@ -159,6 +159,38 @@ TEST(RANK2, BIT_RANK) {
     }
 }
 
+TEST(RANK2, TUNSTALL_BITS) {
+    std::mt19937_64 rng(7);
+    for (double density : {0.0, 0.003, 0.228, 0.5, 0.772, 0.97, 1.0}) {
+        for (size_t size : {0, 1, 2, 100, 594, 5000, 150000}) {
+            std::vector<bool> bits(size);
+            for (size_t i = 0; i < size; ++i) bits[i] = (rng() >> 11) * (1.0 / (1ULL << 53)) < density;
+            fmsi2::tunstall_bits ranks;
+            ranks.build(size, [&](size_t i) { return (bool)bits[i]; });
+            size_t ones = 0;
+            for (size_t i = 0; i <= size; ++i) {
+                ASSERT_EQ(ranks.rank(i), ones) << "density " << density << " size " << size << " position " << i;
+                if (i < size) {
+                    ASSERT_EQ(ranks[i], bits[i]) << "density " << density << " size " << size << " position " << i;
+                    ones += bits[i];
+                }
+            }
+        }
+    }
+    // Runs, which the code is not made for, must still be decoded right.
+    size_t size = 100000;
+    std::vector<bool> bits(size);
+    for (size_t i = 0; i < size; ++i) bits[i] = (i / 3000) % 2;
+    fmsi2::tunstall_bits ranks;
+    ranks.build(size, [&](size_t i) { return (bool)bits[i]; });
+    size_t ones = 0;
+    for (size_t i = 0; i < size; ++i) {
+        ASSERT_EQ(ranks.rank(i), ones);
+        ASSERT_EQ(ranks[i], bits[i]);
+        ones += bits[i];
+    }
+}
+
 TEST(FMS_INDEX2, MATCHES_SUFFIX_ARRAY_CONSTRUCTIONS) {
     std::mt19937_64 rng(3);
     for (int round = 0; round < 20; ++round) {
@@ -182,7 +214,7 @@ TEST(FMS_INDEX2, MEMBERSHIP) {
         auto represented = represented_kmers(ms, k);
         queries q = make_queries(rng, ms, k);
 
-        for (auto mask_type : {fmsi2::mask_kind::plain, fmsi2::mask_kind::rrr}) {
+        for (auto mask_type : {fmsi2::mask_kind::plain, fmsi2::mask_kind::packed, fmsi2::mask_kind::rrr}) {
             mbwt m = compute_mbwt<uint64_t>(ms, k, false);
             fmsi2::index index;
             fmsi2::build(index, m, k, mask_type);
@@ -217,7 +249,7 @@ TEST(FMS_INDEX2, HASHES) {
 
         mbwt m = compute_mbwt<uint64_t>(ms, k, false);
         fmsi2::index index;
-        fmsi2::build(index, m, k, round % 2 ? fmsi2::mask_kind::plain : fmsi2::mask_kind::rrr);
+        fmsi2::build(index, m, k, (fmsi2::mask_kind)(round % 3));
         fmsi2::build_prefix_table(index, round % 3 * 4);
         fmsi2::lookup_stats stats;
         std::vector<int64_t> single(q.sequences.size(), -1), streamed(q.sequences.size(), -1);
@@ -251,7 +283,7 @@ TEST(FMS_INDEX2, SAVE_AND_LOAD) {
     size_t k = 13;
     std::string ms = random_mask(rng, random_superstring(rng, 3000), k, true);
     queries q = make_queries(rng, ms, k);
-    for (auto mask_type : {fmsi2::mask_kind::plain, fmsi2::mask_kind::rrr}) {
+    for (auto mask_type : {fmsi2::mask_kind::plain, fmsi2::mask_kind::packed, fmsi2::mask_kind::rrr}) {
         mbwt m = compute_mbwt<uint64_t>(ms, k, false);
         fmsi2::index built, loaded;
         fmsi2::build(built, m, k, mask_type);

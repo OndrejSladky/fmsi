@@ -391,7 +391,7 @@ static int usage_index2() {
   std::cerr << "Usage:   fmsi index2 [options] <masked-superstring-input>" << std::endl << std::endl;
   std::cerr << "Options:" << std::endl;
   std::cerr << "    -k INT  - size of k-mers [default: number of mask trailing zeros - 1]" << std::endl;
-  std::cerr << "    -m STR  - encoding of the mask: plain (fast) or rrr (small) [default: plain]" << std::endl;
+  std::cerr << "    -m STR  - encoding of the mask: plain (the fastest), packed (smaller), or rrr (the smallest, slow) [default: plain]" << std::endl;
   std::cerr << "    -o STR  - prefix of the index file [default: path to the masked superstring]" << std::endl;
   std::cerr << "    -Q      - construct the suffix array by QSufSort instead of libsais." << std::endl << std::endl;
   std::cerr << "The index is written to <prefix>.fmsi2." << std::endl << std::endl;
@@ -437,6 +437,8 @@ int ms_index2(int argc, char *argv[]) {
     case 'm':
       if (std::string(optarg) == "plain") {
         mask_type = fmsi2::mask_kind::plain;
+      } else if (std::string(optarg) == "packed") {
+        mask_type = fmsi2::mask_kind::packed;
       } else if (std::string(optarg) == "rrr") {
         mask_type = fmsi2::mask_kind::rrr;
       } else {
