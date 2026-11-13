@@ -63,3 +63,6 @@ tests/ms-index-test
 src/sdsl-lite/Make.helper
 src/sdsl-lite/build/
 src/sdsl-lite/test/compile_test.cpp
+
+# OpenMP setting of the last build
+src/openmp.setting

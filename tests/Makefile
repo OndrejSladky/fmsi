@@ -9,6 +9,12 @@ GTEST= googletest/googletest
 SRC= ../src
 LIBSAIS= $(SRC)/libsais/libsais.o $(SRC)/libsais/libsais64.o
 
+CC?= cc
+include $(SRC)/openmp.mk
+ifneq ($(OPENMP_CFLAGS),)
+CXXFLAGS+= -DLIBSAIS_OPENMP
+endif
+
 
 all: test integration-test verification-test
 
@@ -25,8 +31,8 @@ verification-test: ./verify.py
 	python3 verify.py data/GCF_test2_ones.fna.ms.k31 --num_queries=100 --k=31 --streaming_length=60 --optimize=True
 	python3 verify.py data/GCF_009858895.2_ASM985889v3_genomic.fna.ms.k13 --k=13 --hashes=True
 
-fmsi-test: $(wildcard *.cpp *.h *.hpp) gtest-all.o $(SRC)/$(wildcard *.cpp *.h *.hpp) $(SRC)/QSufSort.c $(LIBSAIS)
-	$(CXX) $(CXXFLAGS) -I $(GTEST)/include $(INCLUDES) main.cpp $(SRC)/QSufSort.c $(LIBSAIS) gtest-all.o -pthread -o $@ $(LIBS)
+fmsi-test: $(wildcard *.cpp *.h *.hpp) gtest-all.o $(wildcard $(SRC)/*.cpp $(SRC)/*.h) $(SRC)/QSufSort.c $(LIBSAIS) $(OPENMP_SETTING)
+	$(CXX) $(CXXFLAGS) -I $(GTEST)/include $(INCLUDES) main.cpp $(SRC)/QSufSort.c $(LIBSAIS) gtest-all.o -pthread -o $@ $(LIBS) $(OPENMP_LIBS)
 
 $(LIBSAIS):
 	$(MAKE) -C $(SRC) $(LIBSAIS:$(SRC)/%=%)

@@ -454,6 +454,13 @@ std::vector<qsint_t> suffix_array_qsufsort(const std::string &ms) {
     return sa;
 }
 
+/// Whether libsais constructs the suffix array on several threads.
+#ifdef LIBSAIS_OPENMP
+static const bool SUFFIX_ARRAY_THREADED = true;
+#else
+static const bool SUFFIX_ARRAY_THREADED = false;
+#endif
+
 /// Suffix array of the superstring, including the empty suffix, by libsais
 /// (5 bytes per character with 32-bit integers, 9 bytes with 64-bit ones).
 template <typename sa_t>
@@ -468,11 +475,19 @@ std::vector<sa_t> suffix_array_libsais(const std::string &ms, unsigned threads =
     sa[0] = (sa_t)ms.size();
     build_phases.lap("encode");
     int64_t status;
+#ifdef LIBSAIS_OPENMP
+    if constexpr (sizeof(sa_t) == 4) {
+        status = libsais_omp(codes.data(), sa.data() + 1, (int32_t)ms.size(), 0, nullptr, (int32_t)threads);
+    } else {
+        status = libsais64_omp(codes.data(), sa.data() + 1, (int64_t)ms.size(), 0, nullptr, (int64_t)threads);
+    }
+#else
     if constexpr (sizeof(sa_t) == 4) {
         status = libsais(codes.data(), sa.data() + 1, (int32_t)ms.size(), 0, nullptr);
     } else {
         status = libsais64(codes.data(), sa.data() + 1, (int64_t)ms.size(), 0, nullptr);
     }
+#endif
     if (status != 0) {
         throw std::runtime_error("libsais failed to construct the suffix array");
     }

@@ -397,7 +397,9 @@ static int usage_index2() {
   std::cerr << "    -l      - also construct the kLCP array (1 bit per character), which speeds up streamed queries" << std::endl;
   std::cerr << "    -o STR  - prefix of the index file [default: path to the masked superstring]" << std::endl;
   std::cerr << "    -Q      - construct the suffix array by QSufSort instead of libsais." << std::endl;
-  std::cerr << "    -t INT  - number of threads [default: 1]" << std::endl << std::endl;
+  std::cerr << "    -t INT  - number of threads [default: 1]; the suffix array is constructed on "
+            << (SUFFIX_ARRAY_THREADED ? "all of them (compiled with OpenMP)" : "one thread (compiled without OpenMP)")
+            << std::endl << std::endl;
   std::cerr << "The index is written to <prefix>.fmsi2 and the kLCP array to <prefix>.fmsi2.klcp." << std::endl << std::endl;
   return 1;
 }
@@ -524,7 +526,7 @@ int ms_index2(int argc, char *argv[]) {
   build_phases.lap("write");
 
   double total = 0;
-  std::cerr << "[fmsi2-build]";
+  std::cerr << "[fmsi2-build]\tthreads=" << threads << "\topenmp=" << SUFFIX_ARRAY_THREADED;
   for (const auto &phase : build_phases.phases) {
     std::cerr << "\t" << phase.first << "_s=" << phase.second;
     total += phase.second;
