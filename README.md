@@ -147,6 +147,7 @@ They do not replace the stable commands yet and use their own index file (`<pref
 ./fmsi query2 -q queries.fa ms.fa             # membership of each k-mer, as `fmsi query`
 ./fmsi lookup2 -q queries.fa ms.fa            # hashes of the k-mers, as `fmsi lookup`
 ./fmsi query2 -S -t 8 -q reads.fa ms.fa       # streamed queries on 8 threads
+./fmsi index2 -l ms.fa                        # with the kLCP array, for faster streamed queries
 ```
 
 The differences from the stable index:
@@ -156,6 +157,7 @@ The differences from the stable index:
 - `-b INT` k-mers (or sequences with `-S`) are searched at the same time, each step prefetching the cache lines of the next one.
 - The SA intervals of all strings of length `-p INT` are tabulated when the index is loaded.
 - `-S` streams without a kLCP array: the match of a k-mer is extended to the next k-mer and may get longer than k; when it cannot be extended, the k-mers containing the missing substring are skipped.
+- `index2 -l` adds the kLCP array (`<prefix>.fmsi2.klcp`, 1 bit per character), which `query2 -S` and `lookup2 -S` use if present (`-L` ignores it). The match then stays a k-mer, so consecutive k-mers of a query need not be consecutive in the superstring. This pays off where reads rarely follow the superstring, e.g., on transcriptomes.
 - A k-mer is represented if the k-mer or its reverse complement has a set occurrence (the `or` semantics), so the same index answers membership queries for any mask and lookup queries for masks with the minimum number of ones. The `-O` and `-f` options are not available.
 - K-mers with invalid characters are reported as absent, one value per k-mer of the sequence.
 

@@ -223,7 +223,8 @@ TEST(FMS_INDEX2, MEMBERSHIP) {
         queries q = make_queries(rng, ms, k);
 
         for (auto mask_type : {fmsi2::mask_kind::plain, fmsi2::mask_kind::packed, fmsi2::mask_kind::rrr}) {
-            mbwt m = compute_mbwt<uint64_t>(ms, k, false);
+            // Streaming with and without the kLCP array.
+            mbwt m = compute_mbwt<uint64_t>(ms, k, (round / 2 + (int)mask_type) % 2);
             fmsi2::index index;
             fmsi2::build(index, m, k, mask_type, 64 << (round % 3));
             for (unsigned table : {0, 2, 10}) {
@@ -255,7 +256,7 @@ TEST(FMS_INDEX2, HASHES) {
         auto represented = represented_kmers(ms, k);
         queries q = make_queries(rng, ms, k);
 
-        mbwt m = compute_mbwt<uint64_t>(ms, k, false);
+        mbwt m = compute_mbwt<uint64_t>(ms, k, round / 9 % 2);
         fmsi2::index index;
         fmsi2::build(index, m, k, (fmsi2::mask_kind)(round % 3), 64 << (round / 3 % 3));
         fmsi2::build_prefix_table(index, round % 3 * 4);

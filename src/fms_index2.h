@@ -46,6 +46,10 @@ struct index {
     sdsl::rrr_vector<RRR_BLOCK_SIZE> mask_rrr;
     sdsl::rank_support_rrr<1, RRR_BLOCK_SIZE> mask_rrr_rank;
 
+    /// Optional kLCP array for streaming, stored in a file of its own: bit i is set iff the suffixes
+    /// of the rows i and i + 1 share their first k - 1 characters.
+    sdsl::bit_vector klcp;
+
     /// SA intervals of all patterns of length prefix_length; computed at load time, not stored.
     uint32_t prefix_length = 0;
     std::vector<uint64_t> prefix_table;
@@ -91,6 +95,39 @@ struct index {
         return 0;
     }
 
+    /// Whether a bit of the mask in [i, j) is set, for i < j, given the value returned by mask_prefetch(i).
+    inline bool mask_any(size_t i, size_t j, size_t hint) const {
+        if (mask_get(i, hint)) return true;
+        // Most intervals are short; a long one (a k-mer with many occurrences) costs two ranks, not a scan.
+        size_t stop = std::min(j, i + 4);
+        for (size_t q = i + 1; q < stop; ++q) {
+            if (mask_get(q)) return true;
+        }
+        return stop < j && mask_rank(stop) != mask_rank(j);
+    }
+
+    inline bool has_klcp() const { return klcp.size() > 0; }
+
+    inline void klcp_prefetch(size_t i, size_t j) const {
+        __builtin_prefetch(klcp.data() + ((i - 1) >> 6));
+        __builtin_prefetch(klcp.data() + ((j - 1) >> 6));
+    }
+
+    /// Go from the interval of a string of at least k - 1 characters to the one of its first k - 1 characters.
+    inline void klcp_widen(size_t &i, size_t &j) const {
+        const uint64_t *words = klcp.data();
+        // The first unset bit from j - 1 on; the last bit of the array is unset.
+        size_t w = (j - 1) >> 6;
+        uint64_t unset = ~words[w] & (~0ULL << ((j - 1) & 63));
+        while (unset == 0) unset = ~words[++w];
+        j = (w << 6) + __builtin_ctzll(unset) + 1;
+        // The last unset bit up to i - 1; bit 0 is unset.
+        w = (i - 1) >> 6;
+        unset = ~words[w] & (~0ULL >> (63 - ((i - 1) & 63)));
+        while (unset == 0) unset = ~words[--w];
+        i = (w << 6) + 64 - __builtin_clzll(unset);
+    }
+
     /// Whether mask_prefetch() reads memory that should be prefetched itself, by mask_prefetch_directory().
     inline bool mask_has_directory() const { return mask_type == mask_kind::packed; }
 
@@ -125,6 +162,7 @@ void build(index &ix, mbwt &m, int k, mask_kind mask_type, uint32_t bwt_block_by
     ix.k = k;
     ix.size = m.bwt.size();
     ix.dollar_position = m.dollar_position;
+    ix.klcp = std::move(m.klcp);
 
     ix.bwt = quad_sequence(m.bwt.size(), bwt_block_bytes);
     uint64_t totals[4] = {0, 0, 0, 0};
@@ -205,6 +243,17 @@ void load(index &ix, const std::string &path) {
         ix.mask_rrr_rank = sdsl::rank_support_rrr<1, RRR_BLOCK_SIZE>(&ix.mask_rrr);
     }
     if (!in) throw std::invalid_argument("file " + path + " is truncated");
+}
+
+/// The kLCP array is kept in a file of its own, as it is needed for streaming only.
+void save_klcp(const index &ix, const std::string &path) {
+    if (!sdsl::store_to_file(ix.klcp, path)) throw std::invalid_argument("couldn't write file " + path);
+}
+
+void load_klcp(index &ix, const std::string &path) {
+    if (!sdsl::load_from_file(ix.klcp, path) || ix.klcp.size() != ix.size) {
+        throw std::invalid_argument("file " + path + " is not the kLCP array of the index");
+    }
 }
 
 /// Tabulate the SA intervals of all patterns of the given length. An entry is indexed by the
@@ -360,9 +409,7 @@ void lookup_batch(const index &ix, const char *sequence, const uint32_t *offsets
                 s.hint = ix.mask_prefetch(s.i);
                 break;
             case MASK: {
-                bool represented = ix.mask_get(s.i, s.hint);
-                for (size_t q = s.i + 1; q < s.j && !represented; ++q) represented = ix.mask_get(q);
-                if (represented) {
+                if (ix.mask_any(s.i, s.j, s.hint)) {
                     out[s.offset] = hashes ? (out_t)ix.mask_rank(s.i) : (out_t)1;
                     ++found;
                     score = std::max(-7, std::min(7, score + (s.reverse ? -1 : 1)));
@@ -398,6 +445,10 @@ struct segment {
 /// subset of the occurrences of the k-mer, hence a set mask bit proves the k-mer represented, while an
 /// unset one requires searching the k-mer itself. This needs no kLCP array.
 ///
+/// If the index has the kLCP array, the last character of the match is dropped before the match is
+/// extended, so the match stays a k-mer: consecutive k-mers of the query need not be consecutive in the
+/// superstring and no k-mer is searched again because of an unset mask bit.
+///
 /// When a window cannot be found, the search stopped on a substring that does not occur in the
 /// superstring, so that all windows containing it are absent on this strand. To find such substrings
 /// cheaply, the unresolved windows containing the position where the search stopped are searched
@@ -412,6 +463,7 @@ void lookup_streaming(const index &ix, const char *sequence, const segment *segm
     const out_t UNRESOLVED = hashes ? -1 : 0;
     const out_t ABSENT[2] = {(out_t)(hashes ? -2 : 2), (out_t)(hashes ? -3 : 3)};
     const int NO_BLOCK = -1;
+    const bool klcp = ix.has_klcp();
 
     enum : uint8_t { IDLE, START, SEARCH, CHECK };
     struct slot {
@@ -557,6 +609,7 @@ void lookup_streaming(const index &ix, const char *sequence, const segment *segm
         s.hint = ix.mask_prefetch(s.i);
         ix.bwt.prefetch(s.i);
         ix.bwt.prefetch(s.j);
+        if (klcp) ix.klcp_prefetch(s.i, s.j);
     };
     auto after_search_step = [&](slot &s) {
         if (s.i == s.j) {
@@ -572,13 +625,9 @@ void lookup_streaming(const index &ix, const char *sequence, const segment *segm
     };
     // The interval is the one of a string starting with window x: resolve the window and go to the next one.
     auto check = [&](slot &s) {
-        size_t q = s.i;
-        if (!ix.mask_get(q, s.hint)) {
-            ++q;
-            while (q < s.j && !ix.mask_get(q)) ++q;
-        }
-        if (q < s.j) {
-            result(s, s.x) = hashes ? (out_t)ix.mask_rank(q) : (out_t)1;
+        if (ix.mask_any(s.i, s.j, s.hint)) {
+            // No bit is set between the start of the interval and its first set bit.
+            result(s, s.x) = hashes ? (out_t)ix.mask_rank(s.i) : (out_t)1;
             ++found;
             ++s.hits[s.reverse];
         } else if (!s.exact) {
@@ -603,13 +652,19 @@ void lookup_streaming(const index &ix, const char *sequence, const segment *segm
             return;
         }
         --s.x;
+        // With the kLCP array, drop the last character of the k-mer first, so that the match stays a k-mer.
+        if (klcp) ix.klcp_widen(s.i, s.j);
         update_range(ix, s.i, s.j, symbol(s, s.x));
         ++steps;
-        if (s.i == s.j) {
-            begin_search(s, s.x);
-        } else {
-            s.exact = 0;
+        if (s.i != s.j) {
+            s.exact = klcp;
             to_check(s);
+        } else if (klcp) {
+            // The window does not occur although its last k - 1 characters do: searching it would tell nothing more.
+            s.t = k;
+            search_failed(s);
+        } else {
+            begin_search(s, s.x);
         }
     };
 

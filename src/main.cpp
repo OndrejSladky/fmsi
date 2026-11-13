@@ -393,9 +393,10 @@ static int usage_index2() {
   std::cerr << "    -k INT  - size of k-mers [default: number of mask trailing zeros - 1]" << std::endl;
   std::cerr << "    -m STR  - encoding of the mask: plain (the fastest), packed (smaller), or rrr (the smallest, slow) [default: plain]" << std::endl;
   std::cerr << "    -c INT  - bytes per block of the BWT: 64 (the fastest), 128 or 256 (the smallest) [default: 64]" << std::endl;
+  std::cerr << "    -l      - also construct the kLCP array (1 bit per character), which speeds up streamed queries" << std::endl;
   std::cerr << "    -o STR  - prefix of the index file [default: path to the masked superstring]" << std::endl;
   std::cerr << "    -Q      - construct the suffix array by QSufSort instead of libsais." << std::endl << std::endl;
-  std::cerr << "The index is written to <prefix>.fmsi2." << std::endl << std::endl;
+  std::cerr << "The index is written to <prefix>.fmsi2 and the kLCP array to <prefix>.fmsi2.klcp." << std::endl << std::endl;
   return 1;
 }
 
@@ -405,7 +406,9 @@ static int usage_query2(bool lookup) {
   std::cerr << "Options:" << std::endl;
   std::cerr << "  -q FILE - Path to FASTA/FASTQ with queries [default: stdin]" << std::endl;
   std::cerr << "  -k INT  - Size of k-mers [default: infer automatically from index]" << std::endl;
-  std::cerr << "  -S      - Streamed queries: search the k-mers of a sequence by extending the match of the previous one" << std::endl;
+  std::cerr << "  -S      - Streamed queries: search the k-mers of a sequence by extending the match of the previous one;" << std::endl;
+  std::cerr << "            uses the kLCP array if the index has one" << std::endl;
+  std::cerr << "  -L      - Do not use the kLCP array" << std::endl;
   std::cerr << "  -b INT  - Number of k-mers (or sequences if -S) searched at the same time; 1 turns batching off [default: 32]" << std::endl;
   std::cerr << "  -p INT  - Length of the patterns with tabulated SA intervals; 0 turns the table off [default: 10]" << std::endl;
   std::cerr << "  -t INT  - Number of threads [default: 1]" << std::endl;
@@ -428,7 +431,8 @@ int ms_index2(int argc, char *argv[]) {
   std::string prefix;
   fmsi2::mask_kind mask_type = fmsi2::mask_kind::plain;
   int block_bytes = 64;
-  while ((c = getopt(argc, argv, "hk:m:c:o:Q")) >= 0) {
+  bool use_klcp = false;
+  while ((c = getopt(argc, argv, "hk:m:c:lo:Q")) >= 0) {
     switch (c) {
     case 'h':
       usage = true;
@@ -454,6 +458,9 @@ int ms_index2(int argc, char *argv[]) {
         std::cerr << "ERROR: Mask encoding '" << optarg << "' not recognized." << std::endl;
         return usage_index2();
       }
+      break;
+    case 'l':
+      use_klcp = true;
       break;
     case 'o':
       prefix = optarg;
@@ -485,7 +492,8 @@ int ms_index2(int argc, char *argv[]) {
     std::cerr << "Inferred k from the masked case convention: " << k << std::endl;
   }
 
-  mbwt m = compute_mbwt<uint64_t>(ms, k, false, use_qsufsort);
+  mbwt m = k <= 32 ? compute_mbwt<uint64_t>(ms, k, use_klcp, use_qsufsort)
+                   : compute_mbwt<__uint128_t>(ms, k, use_klcp, use_qsufsort);
   std::cerr << "Constructed the masked Burrows-Wheeler transform" << std::endl;
   size_t length = ms.size();
   ms = std::string();
@@ -495,6 +503,10 @@ int ms_index2(int argc, char *argv[]) {
   std::cerr << "Written index: BWT " << index.bwt.bytes() << " bytes (" << 8.0 * index.bwt.bytes() / length
             << " bits per character), mask " << index.mask_bytes() << " bytes ("
             << 8.0 * index.mask_bytes() / length << " bits per character)" << std::endl;
+  if (use_klcp) {
+    fmsi2::save_klcp(index, prefix + ".fmsi2.klcp");
+    std::cerr << "Written kLCP array: 1 bit per character" << std::endl;
+  }
   return 0;
 }
 
@@ -612,8 +624,9 @@ int ms_query2(int argc, char *argv[], bool output_orders) {
   int batch_size = 32;
   int prefix_length = 10;
   bool streaming = false;
+  bool use_klcp = true;
   int threads = 1;
-  while ((c = getopt(argc, argv, "hq:k:b:p:St:")) >= 0) {
+  while ((c = getopt(argc, argv, "hq:k:b:p:SLt:")) >= 0) {
     switch (c) {
     case 'h':
       usage = true;
@@ -626,6 +639,9 @@ int ms_query2(int argc, char *argv[], bool output_orders) {
       break;
     case 'S':
       streaming = true;
+      break;
+    case 'L':
+      use_klcp = false;
       break;
     case 't':
       threads = atoi(optarg);
@@ -662,6 +678,9 @@ int ms_query2(int argc, char *argv[], bool output_orders) {
     std::cerr << "ERROR: Mismatch. Provided k (" << k << ") does not match the k of the index (" << index.k << ")." << std::endl;
     return usage_query2(output_orders);
   }
+  if (streaming && use_klcp && std::filesystem::exists(fn + ".fmsi2.klcp")) {
+    fmsi2::load_klcp(index, fn + ".fmsi2.klcp");
+  }
   double load_seconds = seconds_since_start();
   fmsi2::build_prefix_table(index, prefix_length);
   double table_seconds = seconds_since_start() - load_seconds;
@@ -675,6 +694,7 @@ int ms_query2(int argc, char *argv[], bool output_orders) {
             << "\tkmers=" << stats.kmers << "\tfound=" << stats.found
             << "\tsteps_per_kmer=" << (stats.kmers ? (double)stats.steps / stats.kmers : 0)
             << "\tsearches=" << stats.searches << "\trechecks=" << stats.rechecks
+            << "\tklcp=" << index.has_klcp()
             << "\tload_s=" << load_seconds << "\ttable_s=" << table_seconds
             << "\tsearch_s=" << stats.seconds
             << "\tsearch_ns_per_kmer=" << (stats.kmers ? 1e9 * stats.seconds / stats.kmers : 0)
