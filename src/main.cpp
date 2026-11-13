@@ -3,6 +3,7 @@
 
 #include "fms_index.h"
 #include "fms_index2.h"
+#include "query_pipeline.h"
 #include "parser.h"
 #include "version.h"
 #include "compact.h"
@@ -411,7 +412,9 @@ static int usage_query2(bool lookup) {
   std::cerr << "  -L      - Do not use the kLCP array" << std::endl;
   std::cerr << "  -b INT  - Number of k-mers (or sequences if -S) searched at the same time; 1 turns batching off [default: 32]" << std::endl;
   std::cerr << "  -p INT  - Length of the patterns with tabulated SA intervals; 0 turns the table off [default: 10]" << std::endl;
-  std::cerr << "  -t INT  - Number of threads [default: 1]" << std::endl;
+  std::cerr << "  -t INT  - Number of threads searching; with more than one, the queries are also read and the output printed" << std::endl;
+  std::cerr << "            by a thread each [default: 1]" << std::endl;
+  std::cerr << "  -B INT  - Number of bases in a block of sequences handed to a thread [default: 1048576]" << std::endl;
   std::cerr << std::endl;
   return 1;
 }
@@ -512,100 +515,17 @@ int ms_index2(int argc, char *argv[]) {
 
 template <bool hashes>
 int run_query2(const fmsi2::index &index, std::string query_fn, unsigned batch_size, bool streaming, unsigned threads,
-               fmsi2::lookup_stats &stats) {
-  typedef typename std::conditional<hashes, int64_t, int8_t>::type out_t;
-  const size_t k = index.k;
-  // Number of bases searched together; the output of a chunk is printed at once.
-  const size_t chunk_bases = (size_t)threads << 22;
-
+               size_t block_bases, fmsi2::query_stats &stats) {
   gzFile fp = OpenFile(query_fn);
+  gzbuffer(fp, 1 << 18);
   kseq_t *seq = kseq_init(fp);
-
-  struct record {
-    std::string name;
-    size_t offset, length;
-  };
-  std::string sequences;
-  std::vector<record> records;
-  std::vector<uint32_t> offsets;
-  std::vector<fmsi2::segment> segments;
-  std::vector<out_t> results;
-  std::string output;
-
-  auto flush = [&]() {
-    offsets.clear();
-    segments.clear();
-    for (auto &r : records) {
-      // Stretches of valid characters.
-      size_t valid = 0;
-      for (size_t i = 0; i <= r.length; ++i) {
-        if (i < r.length && nucleotideToInt[(uint8_t)sequences[r.offset + i]] != 4) {
-          ++valid;
-          if (valid >= k) offsets.push_back(r.offset + i + 1 - k);
-        } else {
-          if (valid >= k) segments.push_back({(uint32_t)(r.offset + i - valid), (uint32_t)valid});
-          valid = 0;
-        }
-      }
-    }
-    // K-mers with invalid characters are reported as absent.
-    results.assign(sequences.size(), hashes ? -1 : 0);
-    // The index is read-only and the results of the k-mers are disjoint, so the work is split evenly.
-    size_t total = streaming ? segments.size() : offsets.size();
-    auto search = [&](size_t begin, size_t end, fmsi2::lookup_stats &part) {
-      if (streaming) {
-        fmsi2::lookup_streaming<hashes, out_t>(index, sequences.data(), segments.data() + begin, end - begin,
-                                               results.data(), batch_size, part);
-      } else {
-        fmsi2::lookup_batch<hashes, out_t>(index, sequences.data(), offsets.data() + begin, end - begin,
-                                           results.data(), batch_size, part);
-      }
-    };
-    auto start = std::chrono::steady_clock::now();
-    std::vector<fmsi2::lookup_stats> parts(threads);
-    std::vector<std::thread> workers;
-    for (unsigned t = 1; t < threads; ++t) {
-      workers.emplace_back(search, total * t / threads, total * (t + 1) / threads, std::ref(parts[t]));
-    }
-    search(0, total / threads, parts[0]);
-    for (auto &worker : workers) worker.join();
-    for (auto &part : parts) stats.add(part);
-    stats.seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-    output.clear();
-    for (auto &r : records) {
-      output += r.name;
-      output += '\t';
-      for (size_t i = 0; i + k <= r.length; ++i) {
-        if (hashes) {
-          if (i > 0) output += ',';
-          output += std::to_string(results[r.offset + i]);
-        } else {
-          output += (char)('0' + results[r.offset + i]);
-        }
-      }
-      output += '\n';
-    }
-    fwrite(output.data(), 1, output.size(), stdout);
-    sequences.clear();
-    records.clear();
-  };
-
-  int64_t sequence_length;
-  while ((sequence_length = kseq_read(seq)) >= 0) {
-    if (sequences.size() + sequence_length >= UINT32_MAX) {
-      flush();
-      if ((size_t)sequence_length >= UINT32_MAX) {
-        std::cerr << "ERROR: Query sequences of 4 Gbp and more are not supported." << std::endl;
-        return 1;
-      }
-    }
-    records.push_back({seq->name.s, sequences.size(), (size_t)sequence_length});
-    sequences.append(seq->seq.s, sequence_length);
-    if (sequences.size() >= chunk_bases) flush();
-  }
-  flush();
+  bool ok = fmsi2::run_queries<hashes>(index, seq, stdout, streaming, batch_size, threads, block_bases, stats);
   kseq_destroy(seq);
   gzclose(fp);
+  if (!ok) {
+    std::cerr << "ERROR: Query sequences of 4 Gbp and more are not supported." << std::endl;
+    return 1;
+  }
   return 0;
 }
 
@@ -626,7 +546,8 @@ int ms_query2(int argc, char *argv[], bool output_orders) {
   bool streaming = false;
   bool use_klcp = true;
   int threads = 1;
-  while ((c = getopt(argc, argv, "hq:k:b:p:SLt:")) >= 0) {
+  long long block_bases = 1 << 20;
+  while ((c = getopt(argc, argv, "hq:k:b:p:SLt:B:")) >= 0) {
     switch (c) {
     case 'h':
       usage = true;
@@ -646,6 +567,9 @@ int ms_query2(int argc, char *argv[], bool output_orders) {
     case 't':
       threads = atoi(optarg);
       break;
+    case 'B':
+      block_bases = atoll(optarg);
+      break;
     case 'b':
       batch_size = atoi(optarg);
       break;
@@ -662,8 +586,8 @@ int ms_query2(int argc, char *argv[], bool output_orders) {
   } else if (fn.empty()) {
     std::cerr << "ERROR: Prefix of the index is a required argument." << std::endl;
     return usage_query2(output_orders);
-  } else if (batch_size < 1 || threads < 1 || prefix_length < 0 || prefix_length > 14) {
-    std::cerr << "ERROR: The batch size and the number of threads must be positive and the table pattern length between 0 and 14." << std::endl;
+  } else if (batch_size < 1 || threads < 1 || block_bases < 1 || prefix_length < 0 || prefix_length > 14) {
+    std::cerr << "ERROR: The batch size, the block size and the number of threads must be positive and the table pattern length between 0 and 14." << std::endl;
     return usage_query2(output_orders);
   }
 
@@ -685,19 +609,23 @@ int ms_query2(int argc, char *argv[], bool output_orders) {
   fmsi2::build_prefix_table(index, prefix_length);
   double table_seconds = seconds_since_start() - load_seconds;
 
-  fmsi2::lookup_stats stats;
-  int ret = output_orders ? run_query2<true>(index, query_fn, batch_size, streaming, threads, stats)
-                          : run_query2<false>(index, query_fn, batch_size, streaming, threads, stats);
+  fmsi2::query_stats stats;
+  int ret = output_orders ? run_query2<true>(index, query_fn, batch_size, streaming, threads, block_bases, stats)
+                          : run_query2<false>(index, query_fn, batch_size, streaming, threads, block_bases, stats);
   fflush(stdout);
 
+  // The times of the stages run by the searching threads are averages per thread.
+  const fmsi2::lookup_stats &lookups = stats.lookups;
   std::cerr << "[fmsi2]"
-            << "\tkmers=" << stats.kmers << "\tfound=" << stats.found
-            << "\tsteps_per_kmer=" << (stats.kmers ? (double)stats.steps / stats.kmers : 0)
-            << "\tsearches=" << stats.searches << "\trechecks=" << stats.rechecks
-            << "\tklcp=" << index.has_klcp()
+            << "\tkmers=" << lookups.kmers << "\tfound=" << lookups.found
+            << "\tsteps_per_kmer=" << (lookups.kmers ? (double)lookups.steps / lookups.kmers : 0)
+            << "\tsearches=" << lookups.searches << "\trechecks=" << lookups.rechecks
+            << "\tklcp=" << index.has_klcp() << "\tthreads=" << threads
             << "\tload_s=" << load_seconds << "\ttable_s=" << table_seconds
-            << "\tsearch_s=" << stats.seconds
-            << "\tsearch_ns_per_kmer=" << (stats.kmers ? 1e9 * stats.seconds / stats.kmers : 0)
+            << "\tread_s=" << stats.read << "\tscan_s=" << stats.scan / threads
+            << "\tsearch_s=" << stats.search / threads
+            << "\tformat_s=" << stats.format / threads << "\twrite_s=" << stats.write
+            << "\tsearch_ns_per_kmer=" << (lookups.kmers ? 1e9 * stats.search / threads / lookups.kmers : 0)
             << "\ttotal_s=" << seconds_since_start() << std::endl;
   return ret;
 }
