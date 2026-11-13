@@ -148,6 +148,7 @@ They do not replace the stable commands yet and use their own index file (`<pref
 ./fmsi lookup2 -q queries.fa ms.fa            # hashes of the k-mers, as `fmsi lookup`
 ./fmsi query2 -S -t 8 -q reads.fa ms.fa       # streamed queries on 8 threads
 ./fmsi index2 -l ms.fa                        # with the kLCP array, for faster streamed queries
+./fmsi index2 -t 8 ms.fa                      # construction on 8 threads
 ```
 
 The differences from the stable index:
@@ -158,10 +159,18 @@ The differences from the stable index:
 - The SA intervals of all strings of length `-p INT` are tabulated when the index is loaded.
 - `-S` streams without a kLCP array: the match of a k-mer is extended to the next k-mer and may get longer than k; when it cannot be extended, the k-mers containing the missing substring are skipped.
 - `index2 -l` adds the kLCP array (`<prefix>.fmsi2.klcp`, 1 bit per character), which `query2 -S` and `lookup2 -S` use if present (`-L` ignores it). The match then stays a k-mer, so consecutive k-mers of a query need not be consecutive in the superstring. This pays off where reads rarely follow the superstring, e.g., on transcriptomes.
+- `-t INT` threads search the queries. As in the pipeline of minimap2, one more thread reads the query file and cuts it into blocks of whole sequences of `-B` bases (1 Mbase), the searching threads take the blocks as they become free, and one more thread prints the results in the order of the input. The work is thus split by bases, not by the number of sequences; a sequence is never split, so a long one is searched by one thread. With `-t 1`, everything runs on one thread.
+- `index2 -t INT` constructs the index on several threads; the index files do not depend on their number. The suffix array is constructed on several threads only if FMSI is compiled with OpenMP (see below).
 - A k-mer is represented if the k-mer or its reverse complement has a set occurrence (the `or` semantics), so the same index answers membership queries for any mask and lookup queries for masks with the minimum number of ones. The `-O` and `-f` options are not available.
 - K-mers with invalid characters are reported as absent, one value per k-mer of the sequence.
 
 Suffix arrays are constructed by [libsais](https://github.com/IlyaGrebnov/libsais) (also in `fmsi index`; `-Q` selects the original QSufSort).
+
+OpenMP is used by libsais only; all other threads are `std::thread`. `make` prints whether it is on:
+
+- GCC and LLVM clang (Linux, conda) take `-fopenmp` as they are.
+- Apple clang has no OpenMP runtime: install the one of Homebrew (`brew install libomp`), which `make` then finds, or compile everything with the GCC of Homebrew (`make CC=gcc-16 CXX=g++-16`; start from a clean checkout, as the bundled sdsl-lite must be compiled by the same compiler).
+- `make OPENMP=0` switches OpenMP off; only the suffix array is then constructed on one thread.
 
 ### k-mer set operations (experimental)
 
