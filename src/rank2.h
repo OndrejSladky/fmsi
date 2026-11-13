@@ -25,6 +25,10 @@
 #define FMSI2_NEON 1
 #endif
 
+#ifndef FMSI2_HINT_STEP
+#define FMSI2_HINT_STEP 128
+#endif
+
 namespace fmsi2 {
 
 /// A zero-initialized heap array aligned to 256 bytes (the largest block, and a multiple of a cache line).
@@ -88,6 +92,62 @@ inline uint64_t low_bits(int bits) {
     if (bits <= 0) return 0ULL;
     return (1ULL << bits) - 1;
 }
+
+/// The first x in [lo, hi) for which above(x) holds, or hi if there is none; above must be monotone
+/// (false up to some point, true from it on). The search gallops from the guess, so it takes few
+/// evaluations when the guess is near.
+template <typename predicate>
+inline size_t first_above(size_t lo, size_t hi, size_t guess, predicate above) {
+    if (lo >= hi) return hi;
+    guess = std::min(std::max(guess, lo), hi - 1);
+    size_t step = 1;
+    if (above(guess)) {
+        hi = guess;
+        while (lo < hi) {
+            size_t probe = hi - lo > step ? hi - step : lo;
+            if (!above(probe)) {
+                lo = probe + 1;
+                break;
+            }
+            hi = probe;
+            step *= 2;
+        }
+    } else {
+        lo = guess + 1;
+        while (lo < hi) {
+            size_t probe = hi - lo > step ? lo + step - 1 : hi - 1;
+            if (above(probe)) {
+                hi = probe;
+                break;
+            }
+            lo = probe + 1;
+            step *= 2;
+        }
+    }
+    while (lo < hi) {
+        size_t middle = lo + (hi - lo) / 2;
+        if (above(middle)) {
+            hi = middle;
+        } else {
+            lo = middle + 1;
+        }
+    }
+    return lo;
+}
+
+/// Position of the set bit number q (from 0) of the word, which has more than q set bits.
+inline int select_in_word(uint64_t word, size_t q) {
+    for (; q > 0; --q) word &= word - 1;
+    return __builtin_ctzll(word);
+}
+
+/// A select query between its two steps: select_prepare finds the superblock, whose counts stay in
+/// the cache, and prefetches the block where the occurrence is expected; select_finish reads the blocks.
+/// In between, other queries can be advanced while the memory arrives.
+struct select_state {
+    /// The rank, the range of blocks to search, and the block to read first.
+    size_t rank, first, last, guess;
+};
 
 /// Rank over a sequence of 2-bit symbols in blocks of BYTES bytes: 64 (2.29 bits per symbol), 128 (2.13)
 /// or 256 (2.06).
@@ -259,6 +319,124 @@ class quad_rank {
         rank_j = j == i + 1 ? rank_i + ((*this)[i] == c) : rank(j, c);
     }
 
+  private:
+    static constexpr size_t NOT_FOUND = ~(size_t)0;
+
+    /// Offset of the occurrence number q (from 0) of c among the symbols of [count] bytes (a multiple of 8),
+    /// or NOT_FOUND, with q decreased by the number of occurrences.
+    static inline size_t select_in_half(const uint8_t *bytes, size_t count, uint8_t c, size_t &q) {
+        const uint64_t pairs = 0x5555555555555555ULL, pattern = pairs * (uint64_t)(c ^ 3);
+        for (size_t byte = 0; byte < count; byte += 8) {
+            uint64_t word;
+            memcpy(&word, bytes + byte, 8);
+            uint64_t x = word ^ pattern;
+            uint64_t found = x & (x >> 1) & pairs;
+            size_t occurrences = __builtin_popcountll(found);
+            if (q < occurrences) return 4 * byte + select_in_word(found, q) / 2;
+            q -= occurrences;
+        }
+        return NOT_FOUND;
+    }
+
+    /// Select hints, built on demand and not stored: for each symbol, the block that select reads for every
+    /// HINT_STEP-th occurrence (the last block with at most that many occurrences before its middle). They
+    /// take 1/16 bit per symbol and bound the search to a few blocks (4 on average for blocks of 64 bytes),
+    /// which are prefetched together.
+    static constexpr size_t HINT_STEP = FMSI2_HINT_STEP;
+    /// Ranges of at most this many blocks are prefetched whole.
+    static constexpr size_t PREFETCHED_RANGE = 6;
+    std::vector<uint32_t> hints_[4];
+
+    /// Number of occurrences of c before the middle of block b.
+    inline size_t before_middle(size_t b, uint8_t c) const {
+        return supers_[b / SUPER_BLOCKS].counts[c] + count_before_middle(blocks_[b], c);
+    }
+
+  public:
+    void build_select_hints() {
+        size_t next[4] = {0, 0, 0, 0};
+        for (int c = 0; c < 4; ++c) hints_[c].clear();
+        for (size_t b = 0; b < blocks_.size(); ++b) {
+            for (int c = 0; c < 4; ++c) {
+                size_t middle = before_middle(b, c);
+                for (; next[c] < middle; next[c] += HINT_STEP) hints_[c].push_back(b == 0 ? 0 : b - 1);
+            }
+        }
+        // The occurrences after the last middle, and an entry to interpolate towards.
+        for (int c = 0; c < 4; ++c) hints_[c].insert(hints_[c].end(), 2, (uint32_t)(blocks_.size() - 1));
+    }
+
+    bool has_select_hints() const { return !hints_[0].empty(); }
+
+    size_t select_hint_bytes() const {
+        size_t entries = 0;
+        for (int c = 0; c < 4; ++c) entries += hints_[c].size();
+        return entries * sizeof(uint32_t);
+    }
+
+    /// Before the first step of select(r, c): prefetch the hints it reads, if there are any.
+    inline void select_prefetch_hints(size_t r, uint8_t c) const {
+        if (!hints_[c].empty()) __builtin_prefetch(hints_[c].data() + std::min(r / HINT_STEP, hints_[c].size() - 2));
+    }
+
+    /// First step of select(r, c).
+    inline select_state select_prepare(size_t r, uint8_t c) const {
+        select_state state;
+        state.rank = r;
+        const std::vector<uint32_t> &hints = hints_[c];
+        if (!hints.empty()) {
+            // The block is between those of the neighbouring hints.
+            size_t j = std::min(r / HINT_STEP, hints.size() - 2);
+            state.first = hints[j];
+            state.last = std::min(blocks_.size(), (size_t)hints[j + 1] + 2);
+            state.guess = state.first + (r - j * HINT_STEP) * (hints[j + 1] - hints[j] + 1) / HINT_STEP;
+        } else {
+            // The last superblock with at most r occurrences before it; the guesses assume them evenly spread.
+            const size_t count = (blocks_.size() + SUPER_BLOCKS - 1) / SUPER_BLOCKS;
+            const uint64_t before_last = supers_[count - 1].counts[c];
+            size_t guess = before_last > 0 ? (size_t)((unsigned __int128)r * (count - 1) / before_last) : 0;
+            size_t s = first_above(1, count, guess + 1, [&](size_t x) { return supers_[x].counts[c] > r; }) - 1;
+            state.first = s * SUPER_BLOCKS;
+            state.last = std::min(blocks_.size(), state.first + SUPER_BLOCKS);
+            size_t blocks = state.last - state.first, rest = r - supers_[s].counts[c];
+            size_t in_super =
+                s + 1 < count ? supers_[s + 1].counts[c] - supers_[s].counts[c] : blocks * BLOCK_SYMBOLS / 4;
+            state.guess = state.first + rest * blocks / std::max<size_t>(1, in_super);
+        }
+        state.guess = std::min(state.guess, state.last - 1);
+        // The occurrence is after the middle of a block or before the middle of the next one. With the
+        // hints, the whole range is prefetched if it is short; else the blocks around the guessed one, as
+        // the guess is often off by one.
+        size_t from = state.guess > 0 ? state.guess - 1 : 0, to = state.guess + 2;
+        if (!hints.empty() && state.last - state.first <= PREFETCHED_RANGE) {
+            from = state.first;
+            to = state.last - 1;
+        }
+        const uint8_t *end = blocks_[std::min(to, blocks_.size() - 1)].bytes + COUNTS_BYTE;
+        for (const uint8_t *line = blocks_[from].bytes + COUNTS_BYTE; line <= end; line += 64) __builtin_prefetch(line);
+        return state;
+    }
+
+    /// Second step of select(r, c).
+    inline size_t select_finish(const select_state &state, uint8_t c) const {
+        // The first block of the range with more than r occurrences before its middle.
+        size_t above = first_above(state.first, state.last, state.guess,
+                                   [&](size_t b) { return before_middle(b, c) > state.rank; });
+        size_t q = state.rank;
+        if (above > state.first) {
+            q -= before_middle(above - 1, c);
+            size_t symbol = select_in_half(blocks_[above - 1].bytes + BYTES / 2, BYTES / 2, c, q);
+            if (symbol != NOT_FOUND) return (above - 1) * BLOCK_SYMBOLS + LEFT_SYMBOLS + symbol;
+        } else {
+            // Before the first middle of the range: the range starts at a superblock or at the first block.
+            q -= supers_[above / SUPER_BLOCKS].counts[c];
+        }
+        return above * BLOCK_SYMBOLS + select_in_half(blocks_[above].bytes, COUNTS_BYTE, c, q);
+    }
+
+    /// Position of the occurrence number r (from 0) of c; there must be more than r occurrences.
+    inline size_t select(size_t r, uint8_t c) const { return select_finish(select_prepare(r, c), c); }
+
     void write(std::ostream &out) const {
         write_pod(out, (uint64_t)size_);
         write_pod(out, (uint64_t)blocks_.size());
@@ -342,6 +520,38 @@ class quad_sequence {
 
     inline void rank_pair(size_t i, size_t j, uint8_t c, size_t &rank_i, size_t &rank_j) const {
         visit([&](const auto &ranks) { ranks.rank_pair(i, j, c, rank_i, rank_j); });
+    }
+
+    inline size_t rank(size_t i, uint8_t c) const {
+        return visit([&](const auto &ranks) { return ranks.rank(i, c); });
+    }
+
+    void build_select_hints() {
+        visit([&](auto &ranks) { ranks.build_select_hints(); });
+    }
+
+    bool has_select_hints() const {
+        return visit([](const auto &ranks) { return ranks.has_select_hints(); });
+    }
+
+    size_t select_hint_bytes() const {
+        return visit([](const auto &ranks) { return ranks.select_hint_bytes(); });
+    }
+
+    inline void select_prefetch_hints(size_t r, uint8_t c) const {
+        visit([&](const auto &ranks) { ranks.select_prefetch_hints(r, c); });
+    }
+
+    inline select_state select_prepare(size_t r, uint8_t c) const {
+        return visit([&](const auto &ranks) { return ranks.select_prepare(r, c); });
+    }
+
+    inline size_t select_finish(const select_state &state, uint8_t c) const {
+        return visit([&](const auto &ranks) { return ranks.select_finish(state, c); });
+    }
+
+    inline size_t select(size_t r, uint8_t c) const {
+        return visit([&](const auto &ranks) { return ranks.select(r, c); });
     }
 
     void write(std::ostream &out) const {
@@ -439,6 +649,44 @@ class bit_rank {
         }
         return result;
     }
+
+    /// First step of select(r).
+    inline select_state select_prepare(size_t r) const {
+        // The last superblock with at most r ones before it; the guess assumes them evenly spread.
+        const size_t count = (blocks_.size() + SUPER_BLOCKS - 1) / SUPER_BLOCKS;
+        const uint64_t before_last = supers_[count - 1];
+        size_t guess = before_last > 0 ? (size_t)((unsigned __int128)r * (count - 1) / before_last) : 0;
+        size_t s = first_above(1, count, guess + 1, [&](size_t x) { return supers_[x] > r; }) - 1;
+        select_state state;
+        state.rank = r - supers_[s];
+        state.first = s * SUPER_BLOCKS;
+        state.last = std::min(blocks_.size(), state.first + SUPER_BLOCKS);
+        size_t blocks = state.last - state.first;
+        size_t in_super = s + 1 < count ? supers_[s + 1] - supers_[s] : blocks * BLOCK_BITS / 2;
+        state.guess = state.first + std::min(blocks - 1, state.rank * blocks / std::max<size_t>(1, in_super));
+        __builtin_prefetch(&blocks_[state.guess]);
+        return state;
+    }
+
+    /// Second step of select(r).
+    inline size_t select_finish(const select_state &state) const {
+        // The last block of the superblock with at most that many ones before it; the rank of the state
+        // is relative to the superblock.
+        size_t b = first_above(state.first + 1, state.last, state.guess + 1,
+                               [&](size_t x) { return (blocks_[x].words[0] & HEADER_MASK) > state.rank; }) - 1;
+        const bit_block &block = blocks_[b];
+        size_t q = state.rank - (block.words[0] & HEADER_MASK);
+        for (int w = 0; w < 8; ++w) {
+            uint64_t word = w == 0 ? block.words[0] & ~HEADER_MASK : block.words[w];
+            size_t ones = __builtin_popcountll(word);
+            if (q < ones) return b * BLOCK_BITS + 64 * w + select_in_word(word, q) - HEADER_BITS;
+            q -= ones;
+        }
+        return size_;
+    }
+
+    /// Position of the one number r (from 0); there must be more than r ones.
+    inline size_t select(size_t r) const { return select_finish(select_prepare(r)); }
 
     void write(std::ostream &out) const {
         write_pod(out, (uint64_t)size_);

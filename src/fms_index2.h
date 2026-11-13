@@ -55,6 +55,12 @@ struct index {
     uint32_t prefix_length = 0;
     std::vector<uint64_t> prefix_table;
 
+    /// For access (hash -> k-mer), computed when the index is built or loaded, not stored: the number
+    /// of symbols A of the BWT before the dollar, which is stored as A, and the number of set bits of
+    /// the mask, i.e., of hashes.
+    uint64_t dollar_rank = 0;
+    uint64_t mask_ones = 0;
+
     index() = default;
     index(const index &) = delete;
     index &operator=(const index &) = delete;
@@ -79,6 +85,14 @@ struct index {
         default:
             return mask_rrr_rank(i);
         }
+    }
+
+    /// Position of the set bit number h (from 0) of the mask, for h < mask_ones.
+    inline size_t mask_select(size_t h) const {
+        if (mask_type == mask_kind::plain) return mask.select(h);
+        // The other encodings have no select: the position is searched by rank from an interpolated guess.
+        size_t guess = (size_t)((unsigned __int128)h * size / std::max<uint64_t>(1, mask_ones));
+        return first_above(0, size, guess, [&](size_t i) { return mask_rank(i + 1) > h; });
     }
 
     /// Bit i, given the value returned by mask_prefetch(i).
@@ -158,6 +172,17 @@ inline void update_range(const index &ix, size_t &i, size_t &j, byte c) {
     j = count + rank_j - (c == 0 && j > ix.dollar_position);
 }
 
+/// Set what access needs beyond the stored index and costs nothing.
+inline void prepare_access(index &ix) {
+    ix.dollar_rank = ix.bwt.rank(ix.dollar_position, 0);
+    ix.mask_ones = ix.mask_rank(ix.size);
+}
+
+/// Build the select hints of the BWT, which make access several times faster. They take one pass over
+/// the blocks of the BWT and 1/16 bit per character, and are not stored. Without them, access works
+/// too, guessing from the superblocks.
+inline void build_access_support(index &ix) { ix.bwt.build_select_hints(); }
+
 /// Build the index from the MBWT, which is consumed.
 void build(index &ix, mbwt &m, int k, mask_kind mask_type, uint32_t bwt_block_bytes = 64, unsigned threads = 1) {
     ix.k = k;
@@ -207,6 +232,7 @@ void build(index &ix, mbwt &m, int k, mask_kind mask_type, uint32_t bwt_block_by
         ix.mask_rrr_rank = sdsl::rank_support_rrr<1, RRR_BLOCK_SIZE>(&ix.mask_rrr);
     }
     m.sa_transformed_mask.resize(0);
+    prepare_access(ix);
     build_phases.lap("pack_mask");
 }
 
@@ -259,6 +285,7 @@ void load(index &ix, const std::string &path) {
         ix.mask_rrr_rank = sdsl::rank_support_rrr<1, RRR_BLOCK_SIZE>(&ix.mask_rrr);
     }
     if (!in) throw std::invalid_argument("file " + path + " is truncated");
+    prepare_access(ix);
 }
 
 /// The kLCP array is kept in a file of its own, as it is needed for streaming only.
@@ -714,6 +741,107 @@ void lookup_streaming(const index &ix, const char *sequence, const segment *segm
     stats.steps += steps;
     stats.searches += searches;
     stats.rechecks += rechecks;
+}
+
+/// The first symbol of the suffix of a row (not the row 0 of the empty suffix).
+inline uint8_t first_symbol(const index &ix, size_t row) {
+    return (row >= ix.counts[1]) + (row >= ix.counts[2]) + (row >= ix.counts[3]);
+}
+
+/// For a row whose suffix starts with c: the number, among the occurrences of c stored in the BWT, of
+/// the occurrence at the row of the suffix shortened by this c. Selecting it inverts update_range.
+inline size_t next_row_rank(const index &ix, size_t row, uint8_t c) {
+    size_t r = row - ix.counts[c];
+    // The dollar is stored as A in the BWT without being an occurrence of A.
+    return r + (c == 0 && r >= ix.dollar_rank);
+}
+
+/// Access: the k-mer with the given hash, i.e., the k-mer at the set occurrence number [hash] (from 0)
+/// of the mask in the order of the suffix array; k characters are written to out. The hash must be less
+/// than mask_ones. With one set occurrence per k-mer (a mask with the minimum number of ones), this
+/// inverts the hashes of the lookups: the k-mer is returned as it occurs in the superstring, so it is
+/// the looked-up k-mer or its reverse complement.
+///
+/// The row of the occurrence is found by a select on the mask, and each character by a select on the BWT.
+inline void access(const index &ix, uint64_t hash, char *out) {
+    size_t row = ix.mask_select(hash);
+    for (uint32_t t = 0; t < ix.k; ++t) {
+        uint8_t c = first_symbol(ix, row);
+        out[t] = "ACGT"[c];
+        if (t + 1 < ix.k) row = ix.bwt.select(next_row_rank(ix, row, c), c);
+    }
+}
+
+/// Access for [count] hashes, [batch_size] of them at a time: the k-mer of hashes[i] is written to
+/// out + i * k. Each select is split into its steps, and the other k-mers of the batch are advanced
+/// while the memory it prefetched arrives: the hints of the select (if built), then the blocks.
+inline void access_batch(const index &ix, const uint64_t *hashes, size_t count, char *out, unsigned batch_size) {
+    const uint32_t k = ix.k;
+    const bool plain = ix.mask_type == mask_kind::plain;
+    const bool hints = ix.bwt.has_select_hints();
+    // FETCH: the slot needs a hash; MASK: a select on the mask was prepared; HINT, SYMBOL: the hints
+    // or the blocks of a select on the BWT were prefetched.
+    enum : uint8_t { FETCH, MASK, HINT, SYMBOL, DONE };
+    struct slot {
+        select_state select;
+        size_t row, rank;
+        char *out;
+        uint32_t t;
+        uint8_t c, state;
+    };
+    std::vector<slot> slots(std::max(1u, batch_size));
+    for (slot &s : slots) s.state = FETCH;
+    size_t next = 0, active = slots.size();
+
+    while (active > 0) {
+        for (slot &s : slots) {
+            if (s.state == DONE) continue;
+            if (s.state == HINT) {
+                s.select = ix.bwt.select_prepare(s.rank, s.c);
+                s.state = SYMBOL;
+                continue;
+            }
+            if (s.state == MASK) {
+                s.row = ix.mask.select_finish(s.select);
+            } else if (s.state == SYMBOL) {
+                s.row = ix.bwt.select_finish(s.select, s.c);
+            }
+            // Go on until the next select is under way or no hash is left.
+            for (;;) {
+                if (s.state == FETCH) {
+                    if (next == count) {
+                        s.state = DONE;
+                        --active;
+                        break;
+                    }
+                    s.out = out + next * k;
+                    s.t = 0;
+                    uint64_t hash = hashes[next++];
+                    if (plain) {
+                        s.select = ix.mask.select_prepare(hash);
+                        s.state = MASK;
+                        break;
+                    }
+                    s.row = ix.mask_select(hash);
+                }
+                s.c = first_symbol(ix, s.row);
+                s.out[s.t] = "ACGT"[s.c];
+                if (++s.t == k) {
+                    s.state = FETCH;
+                    continue;
+                }
+                s.rank = next_row_rank(ix, s.row, s.c);
+                if (hints) {
+                    ix.bwt.select_prefetch_hints(s.rank, s.c);
+                    s.state = HINT;
+                } else {
+                    s.select = ix.bwt.select_prepare(s.rank, s.c);
+                    s.state = SYMBOL;
+                }
+                break;
+            }
+        }
+    }
 }
 
 } // namespace fmsi2

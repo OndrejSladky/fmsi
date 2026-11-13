@@ -146,6 +146,7 @@ They do not replace the stable commands yet and use their own index file (`<pref
 ./fmsi index2 ms.fa                           # smaller and somewhat slower: -m packed, -c 128
 ./fmsi query2 -q queries.fa ms.fa             # membership of each k-mer, as `fmsi query`
 ./fmsi lookup2 -q queries.fa ms.fa            # hashes of the k-mers, as `fmsi lookup`
+./fmsi access2 -q hashes.txt ms.fa            # the k-mers of hashes, the inverse of lookup2
 ./fmsi query2 -S -t 8 -q reads.fa ms.fa       # streamed queries on 8 threads
 ./fmsi index2 -l ms.fa                        # with the kLCP array, for faster streamed queries
 ./fmsi index2 -t 8 ms.fa                      # construction on 8 threads
@@ -164,6 +165,7 @@ The differences from the stable index:
 - `index2 -t INT` constructs the index on several threads; the index files do not depend on their number. The suffix array is constructed on several threads only if FMSI is compiled with OpenMP (see below).
 - A k-mer is represented if the k-mer or its reverse complement has a set occurrence (the `or` semantics), so the same index answers membership queries for any mask and lookup queries for masks with the minimum number of ones. The `-O` and `-f` options are not available.
 - K-mers with invalid characters are reported as absent, one value per k-mer of the sequence.
+- `access2` prints the k-mer of every hash (one integer per line of `-q`), as it occurs in the superstring, so it is the looked-up k-mer or its reverse complement; a value that is not a hash gives a line with `-`. It inverts `lookup2` for masks with the minimum number of ones. The occurrence is found by a select on the mask and each character by a select on the BWT; `-b INT` k-mers are retrieved at the same time, with the hints and the blocks of every select prefetched. The select hints (1/16 bit per character) are built when the command starts and are not stored; the packed and RRR masks are searched by rank and are slower.
 
 Suffix arrays are constructed by [libsais](https://github.com/IlyaGrebnov/libsais) (also in `fmsi index`; `-Q` selects the original QSufSort).
 

@@ -148,6 +148,79 @@ TEST(RANK2, QUAD_RANK) {
     test_quad_rank<256>();
 }
 
+template <size_t BYTES>
+void test_quad_select() {
+    std::mt19937_64 rng(11);
+    const size_t block = fmsi2::quad_rank<BYTES>::BLOCK_SYMBOLS, super = block * fmsi2::quad_rank<BYTES>::SUPER_BLOCKS;
+    // Symbols drawn evenly, with long runs, and with one symbol nearly absent: the guesses of select are
+    // good in the first case and bad in the others.
+    for (int kind = 0; kind < 3; ++kind) {
+        for (size_t size : {(size_t)1, block - 1, block, block + 1, 9 * block + 5, super, super + 1, 2 * super + 77}) {
+            std::vector<uint8_t> symbols(size);
+            fmsi2::quad_rank<BYTES> ranks(size);
+            uint8_t current = 0;
+            for (size_t i = 0; i < size; ++i) {
+                if (kind == 0) {
+                    current = rng() % 4;
+                } else if (kind == 1) {
+                    if (rng() % 700 == 0) current = rng() % 4;
+                } else {
+                    current = rng() % 5000 == 0 ? 3 : rng() % 3;
+                }
+                symbols[i] = current;
+                ranks.set(i, symbols[i]);
+            }
+            ranks.finalize();
+            // Without the select hints and with them.
+            for (int hints = 0; hints < 2; ++hints) {
+                if (hints) ranks.build_select_hints();
+                ASSERT_EQ(ranks.has_select_hints(), (bool)hints);
+                size_t counts[4] = {0, 0, 0, 0};
+                for (size_t i = 0; i < size; ++i) {
+                    uint8_t c = symbols[i];
+                    ASSERT_EQ(ranks.select(counts[c], c), i)
+                        << "kind " << kind << " size " << size << " symbol " << (int)c << " hints " << hints;
+                    counts[c]++;
+                }
+            }
+        }
+    }
+}
+
+TEST(RANK2, QUAD_SELECT) {
+    test_quad_select<64>();
+    test_quad_select<128>();
+    test_quad_select<256>();
+}
+
+TEST(RANK2, BIT_SELECT) {
+    std::mt19937_64 rng(12);
+    for (int kind = 0; kind < 3; ++kind) {
+        for (size_t size : {1, 495, 496, 497, 5000, 63488, 63489, 140000, 400000}) {
+            fmsi2::bit_rank ranks(size);
+            std::vector<size_t> ones;
+            bool current = true;
+            for (size_t i = 0; i < size; ++i) {
+                if (kind == 0) {
+                    current = rng() % 3 == 0;
+                } else if (kind == 1) {
+                    if (rng() % 3000 == 0) current = !current;
+                } else {
+                    current = rng() % 20000 == 0;
+                }
+                if (current) {
+                    ranks.set(i);
+                    ones.push_back(i);
+                }
+            }
+            ranks.finalize();
+            for (size_t r = 0; r < ones.size(); ++r) {
+                ASSERT_EQ(ranks.select(r), ones[r]) << "kind " << kind << " size " << size << " one " << r;
+            }
+        }
+    }
+}
+
 TEST(RANK2, BIT_RANK) {
     std::mt19937_64 rng(2);
     for (size_t size : {0, 1, 495, 496, 497, 5000, 63488, 63489, 140000}) {
@@ -320,6 +393,50 @@ TEST(FMS_INDEX2, HASHES) {
         // The superstring itself is among the queries, so all k-mers were looked up.
         EXPECT_EQ(hash_of.size(), represented.size());
         EXPECT_EQ(hashes.size(), represented.size());
+    }
+}
+
+// Access inverts the hashes: the k-mer of every hash is represented, has this hash, and the batched
+// access returns the same k-mers for every batch size.
+TEST(FMS_INDEX2, ACCESS) {
+    std::mt19937_64 rng(6);
+    for (int round = 0; round < 45; ++round) {
+        size_t k = std::vector<size_t>{3, 5, 13, 31}[rng() % 4];
+        std::string ms = random_mask(rng, random_superstring(rng, k + rng() % 4000), k, true);
+        auto represented = represented_kmers(ms, k);
+
+        mbwt m = compute_mbwt<uint64_t>(ms, k, false);
+        fmsi2::index index;
+        fmsi2::build(index, m, k, (fmsi2::mask_kind)(round % 3), 64 << (round / 3 % 3));
+        fmsi2::build_prefix_table(index, round % 3 * 4);
+        ASSERT_EQ(index.mask_ones, represented.size()) << "k " << k << " round " << round;
+        if (round % 2) fmsi2::build_access_support(index);
+
+        std::vector<uint64_t> hashes(index.mask_ones);
+        for (size_t h = 0; h < hashes.size(); ++h) hashes[h] = h;
+        std::shuffle(hashes.begin(), hashes.end(), rng);
+        std::string single(hashes.size() * k, 0);
+        for (size_t i = 0; i < hashes.size(); ++i) fmsi2::access(index, hashes[i], single.data() + i * k);
+        for (unsigned batch : {1u, 2u, 7u, 32u, 1000u}) {
+            std::string batched(hashes.size() * k, 0);
+            fmsi2::access_batch(index, hashes.data(), hashes.size(), batched.data(), batch);
+            ASSERT_EQ(batched, single) << "k " << k << " round " << round << " batch " << batch;
+        }
+
+        // Looking the k-mers up gives the hashes back.
+        std::vector<uint32_t> offsets(hashes.size());
+        for (size_t i = 0; i < hashes.size(); ++i) offsets[i] = i * k;
+        std::vector<int64_t> found(single.size() + 1, -1);
+        fmsi2::lookup_stats stats;
+        fmsi2::lookup_batch<true, int64_t>(index, single.data(), offsets.data(), offsets.size(), found.data(), 7, stats);
+        std::set<std::string> seen;
+        for (size_t i = 0; i < hashes.size(); ++i) {
+            std::string kmer = single.substr(i * k, k);
+            ASSERT_TRUE(represented.count(canonical(kmer))) << "k " << k << " round " << round << " k-mer " << kmer;
+            ASSERT_EQ(found[offsets[i]], (int64_t)hashes[i]) << "k " << k << " round " << round << " k-mer " << kmer;
+            seen.insert(canonical(kmer));
+        }
+        EXPECT_EQ(seen.size(), represented.size());
     }
 }
 

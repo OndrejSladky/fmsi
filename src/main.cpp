@@ -30,7 +30,8 @@ static int usage() {
   std::cerr << "Command (FMSI 2 prototype):" << std::endl;
   std::cerr << "    index2  - Creates an index with a cache-friendly layout." << std::endl;
   std::cerr << "    query2  - Queries k-mers against an index2 index in batches." << std::endl;
-  std::cerr << "    lookup2 - Return unique hashes of present k-mers using an index2 index." << std::endl << std::endl;
+  std::cerr << "    lookup2 - Return unique hashes of present k-mers using an index2 index." << std::endl;
+  std::cerr << "    access2 - Return the k-mers of hashes using an index2 index." << std::endl << std::endl;
   std::cerr << "Command (experimental, using f-MS framework):" << std::endl;
   std::cerr << "    union   - Compute union of k-mers from several indices." << std::endl;
   std::cerr << "    inter   - Compute intersection of k-mers from several indices." << std::endl;
@@ -942,6 +943,113 @@ int ms_clean(int argc, char *argv[]) {
   return 0;
 }
 
+static int usage_access2() {
+  std::cerr << std::endl;
+  std::cerr << "Usage:   fmsi access2 [options] <index-prefix>" << std::endl << std::endl;
+  std::cerr << "Prints the k-mer of every hash, as it occurs in the masked superstring; the inverse of `fmsi lookup2`" << std::endl;
+  std::cerr << "for a mask with the minimum number of ones. A value that is not a hash gives a line with `-`." << std::endl << std::endl;
+  std::cerr << "Options:" << std::endl;
+  std::cerr << "  -q FILE - Hashes, one non-negative integer per line; if `-` or not provided then standard input is used." << std::endl;
+  std::cerr << "  -b INT  - Number of k-mers retrieved at the same time, with prefetching [default: 32]" << std::endl;
+  std::cerr << std::endl;
+  return 1;
+}
+
+int ms_access2(int argc, char *argv[]) {
+  bool usage = false;
+  int c;
+  std::string fn;
+  if (argc > 1 && std::string(argv[argc - 1]) != "-h") {
+    fn = argv[argc - 1];
+    argc--;
+  }
+  std::string query_fn = "-";
+  int batch_size = 32;
+  while ((c = getopt(argc, argv, "hq:b:")) >= 0) {
+    switch (c) {
+    case 'h':
+      usage = true;
+      break;
+    case 'q':
+      query_fn = optarg;
+      break;
+    case 'b':
+      batch_size = atoi(optarg);
+      break;
+    default:
+      return usage_access2();
+    }
+  }
+  if (usage) {
+    usage_access2();
+    return 0;
+  } else if (fn.empty()) {
+    std::cerr << "ERROR: Prefix of the index is a required argument." << std::endl;
+    return usage_access2();
+  } else if (batch_size < 1) {
+    std::cerr << "ERROR: The batch size must be positive." << std::endl;
+    return usage_access2();
+  }
+
+  fmsi2::index index;
+  fmsi2::load(index, fn + ".fmsi2");
+  fmsi2::build_access_support(index);
+
+  std::ifstream file;
+  if (query_fn != "-") {
+    file.open(query_fn);
+    if (!file) {
+      std::cerr << "ERROR: Cannot open " << query_fn << std::endl;
+      return 1;
+    }
+  }
+  std::istream &in = query_fn == "-" ? std::cin : file;
+
+  // The hashes are processed in chunks; a value that is not a hash is replaced by a valid one and its line by `-`.
+  const size_t chunk = 1 << 16, k = index.k;
+  std::vector<uint64_t> hashes;
+  std::vector<bool> valid;
+  std::string kmers, output, line;
+  uint64_t total = 0, invalid = 0;
+  double seconds = 0;
+  bool more = true;
+  while (more) {
+    hashes.clear();
+    valid.clear();
+    while (hashes.size() < chunk && (more = (bool)std::getline(in, line))) {
+      char *end = nullptr;
+      errno = 0;
+      unsigned long long value = strtoull(line.c_str(), &end, 10);
+      bool is_hash = !line.empty() && isdigit((unsigned char)line[0]) && errno == 0 && value < index.mask_ones &&
+                     (*end == '\0' || isspace((unsigned char)*end));
+      hashes.push_back(is_hash ? value : 0);
+      valid.push_back(is_hash);
+      invalid += !is_hash;
+    }
+    if (index.mask_ones == 0) std::fill(valid.begin(), valid.end(), false);
+    kmers.assign(hashes.size() * k, 0);
+    auto start = std::chrono::steady_clock::now();
+    if (index.mask_ones > 0) fmsi2::access_batch(index, hashes.data(), hashes.size(), kmers.data(), batch_size);
+    seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    output.clear();
+    for (size_t i = 0; i < hashes.size(); ++i) {
+      if (valid[i]) {
+        output.append(kmers, i * k, k);
+      } else {
+        output.push_back('-');
+      }
+      output.push_back('\n');
+    }
+    fwrite(output.data(), 1, output.size(), stdout);
+    total += hashes.size();
+  }
+  fflush(stdout);
+  std::cerr << "[fmsi2-access]"
+            << "\thashes=" << total << "\tinvalid=" << invalid << "\tnumber_of_hashes=" << index.mask_ones
+            << "\taccess_ns_per_kmer=" << (total ? 1e9 * seconds / total : 0) << std::endl;
+  return 0;
+}
+
 int main(int argc, char *argv[]) {
   int ret;
   if (argc < 2)
@@ -959,6 +1067,8 @@ int main(int argc, char *argv[]) {
     ret = ms_query2(argc - 1, argv + 1, false);
   else if (op == "lookup2")
     ret = ms_query2(argc - 1, argv + 1, true);
+  else if (op == "access2")
+    ret = ms_access2(argc - 1, argv + 1);
   else if (op == "clean")
     ret = ms_clean(argc - 1, argv + 1);
   else if (op == "merge")
