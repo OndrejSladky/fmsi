@@ -417,7 +417,7 @@ static int usage_query2(bool lookup) {
   std::cerr << "  -p INT  - Length of the patterns with tabulated SA intervals; 0 turns the table off [default: 10]" << std::endl;
   std::cerr << "  -t INT  - Number of threads searching; with more than one, the queries are also read and the output printed" << std::endl;
   std::cerr << "            by a thread each [default: 1]" << std::endl;
-  std::cerr << "  -B INT  - Number of bases in a block of sequences handed to a thread [default: 1048576]" << std::endl;
+  std::cerr << "  -B INT  - Size of a block of sequences handed to a thread, in bytes of the query file [default: 1048576]" << std::endl;
   std::cerr << std::endl;
   return 1;
 }
@@ -540,9 +540,7 @@ int run_query2(const fmsi2::index &index, std::string query_fn, unsigned batch_s
                size_t block_bases, fmsi2::query_stats &stats) {
   gzFile fp = OpenFile(query_fn);
   gzbuffer(fp, 1 << 18);
-  kseq_t *seq = kseq_init(fp);
-  bool ok = fmsi2::run_queries<hashes>(index, seq, stdout, streaming, batch_size, threads, block_bases, stats);
-  kseq_destroy(seq);
+  bool ok = fmsi2::run_queries<hashes>(index, fp, stdout, streaming, batch_size, threads, block_bases, stats);
   gzclose(fp);
   if (!ok) {
     std::cerr << "ERROR: Query sequences of 4 Gbp and more are not supported." << std::endl;
@@ -644,7 +642,8 @@ int ms_query2(int argc, char *argv[], bool output_orders) {
             << "\tsearches=" << lookups.searches << "\trechecks=" << lookups.rechecks
             << "\tklcp=" << index.has_klcp() << "\tthreads=" << threads
             << "\tload_s=" << load_seconds << "\ttable_s=" << table_seconds
-            << "\tread_s=" << stats.read << "\tscan_s=" << stats.scan / threads
+            << "\tread_s=" << stats.read << "\tparse_s=" << stats.parse / threads
+            << "\tscan_s=" << stats.scan / threads
             << "\tsearch_s=" << stats.search / threads
             << "\tformat_s=" << stats.format / threads << "\twrite_s=" << stats.write
             << "\tsearch_ns_per_kmer=" << (lookups.kmers ? 1e9 * stats.search / threads / lookups.kmers : 0)
