@@ -51,3 +51,15 @@ tests/ms-index-test
 
 # CLion
 .idea/
+
+# Debug symbols (macOS)
+*.dSYM/
+
+# FMSI 2 prototype indexes
+*.fmsi2
+*.fmsi2.klcp
+
+# Build of the bundled sdsl-lite
+src/sdsl-lite/Make.helper
+src/sdsl-lite/build/
+src/sdsl-lite/test/compile_test.cpp
