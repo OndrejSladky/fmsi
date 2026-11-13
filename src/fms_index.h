@@ -7,10 +7,12 @@
 #include <sdsl/rank_support_v5.hpp>
 #include <sdsl/rank_support_v.hpp>
 #include <sdsl/rank_support.hpp>
+#include <chrono>
 #include "QSufSort.h"
 #include "libsais/libsais.h"
 #include "libsais/libsais64.h"
 #include "functions.h"
+#include "parallel.h"
 #include "kmers.h"
 #include <iostream>
 
@@ -344,6 +346,9 @@ void query_kmers(fms_index& index, char* sequence, size_t sequence_length, int k
 }
 
 
+/// How far ahead the loops over the suffix array prefetch the text.
+static const size_t PREFETCH_DISTANCE = 32;
+
 template <typename T>
 inline T obtain_kmer(std::vector<T> &kmers, std::string &ms, size_t i, int kmer_sparsity, T mask, int k_minus_1) {
     size_t i_base = i - (i % kmer_sparsity);
@@ -357,32 +362,53 @@ inline T obtain_kmer(std::vector<T> &kmers, std::string &ms, size_t i, int kmer_
 }
 
 template <typename T, typename sa_t>
-sdsl::bit_vector construct_klcp(const sa_t *sa, std::string& ms, size_t k_minus_1) {
+sdsl::bit_vector construct_klcp(const sa_t *sa, std::string& ms, size_t k_minus_1, unsigned threads = 1) {
     int kmer_sparsity = 4;
-    std::vector<T> kmers ((ms.size() - k_minus_1 + 1) / kmer_sparsity + 1);
-    T kmer = 0;
+    size_t positions = ms.size() - k_minus_1 + 1;
+    std::vector<T> kmers (positions / kmer_sparsity + 1);
     T mask = (T(1) << (2 * k_minus_1 - 1));
     mask = mask | (mask - 1);
-    for (size_t i = 0; i < k_minus_1 - 1; ++i) {
-        kmer = (kmer << 2) | nucleotideToInt[(uint8_t)ms[i]];
-    }
-    for (size_t i = 0; i < ms.size() - k_minus_1 + 1; ++i) {
-        kmer = (kmer << 2);
-        kmer |= nucleotideToInt[(uint8_t)ms[i+k_minus_1-1]];
-        kmer &= mask;
-        if (i % kmer_sparsity == 0) {
-            kmers[i / kmer_sparsity] = kmer;
+    // The (k-1)-mer of every fourth position; a chunk starts from the characters before its first (k-1)-mer ends.
+    parallel_chunks(positions, threads, parallel_chunk(kmer_sparsity), [&](size_t begin, size_t end, unsigned) {
+        T kmer = 0;
+        for (size_t i = begin; i < begin + k_minus_1 - 1; ++i) {
+            kmer = (kmer << 2) | nucleotideToInt[(uint8_t)ms[i]];
         }
-    }
+        for (size_t i = begin; i < end; ++i) {
+            kmer = (kmer << 2);
+            kmer |= nucleotideToInt[(uint8_t)ms[i+k_minus_1-1]];
+            kmer &= mask;
+            if (i % kmer_sparsity == 0) {
+                kmers[i / kmer_sparsity] = kmer;
+            }
+        }
+    });
     sdsl::bit_vector klcp (ms.size() + 1, 0);
-    for (size_t i = 0; i < ms.size(); ++i) {
-        size_t sa_i = sa[i];
-        size_t sa_i1 = sa[i+1];
-        if (sa_i > ms.size() - k_minus_1 || sa_i1 > ms.size() - k_minus_1) {
-            continue;
+    const size_t last_position = ms.size() - k_minus_1;
+    // Suffixes that are neighbours in the suffix array start anywhere in the superstring,
+    // so the (k-1)-mers of the suffixes a few steps ahead are prefetched.
+    auto prefetch = [&](size_t position) {
+        __builtin_prefetch(kmers.data() + position / kmer_sparsity);
+        __builtin_prefetch(ms.data() + position + k_minus_1);
+    };
+    // A chunk is a whole number of 64-bit words of the bitvector.
+    parallel_chunks(ms.size(), threads, parallel_chunk(64), [&](size_t begin, size_t end, unsigned) {
+        uint64_t *words = klcp.data();
+        size_t position = sa[begin];
+        bool has_kmer = position <= last_position;
+        T kmer = has_kmer ? obtain_kmer(kmers, ms, position, kmer_sparsity, mask, k_minus_1) : 0;
+        for (size_t i = begin; i < end; ++i) {
+            if (i + PREFETCH_DISTANCE <= ms.size()) prefetch(sa[i + PREFETCH_DISTANCE]);
+            size_t next_position = sa[i+1];
+            bool next_has_kmer = next_position <= last_position;
+            T next_kmer = next_has_kmer ? obtain_kmer(kmers, ms, next_position, kmer_sparsity, mask, k_minus_1) : 0;
+            if (has_kmer && next_has_kmer && kmer == next_kmer) {
+                words[i >> 6] |= 1ULL << (i & 63);
+            }
+            kmer = next_kmer;
+            has_kmer = next_has_kmer;
         }
-        klcp[i] = obtain_kmer(kmers, ms, sa_i, kmer_sparsity, mask, k_minus_1) == obtain_kmer(kmers, ms, sa_i1, kmer_sparsity, mask, k_minus_1);
-    }
+    });
     return klcp;
 }
 
@@ -395,6 +421,20 @@ qsint_t* convert_superstring(const std::string &ms) {
     }
     return ret;
 }
+
+/// Wall-clock time of the phases of the construction, reported by index2.
+struct phase_timer {
+    std::vector<std::pair<std::string, double>> phases;
+    std::chrono::steady_clock::time_point last = std::chrono::steady_clock::now();
+
+    /// The time since the previous call belongs to the given phase.
+    void lap(const std::string &phase) {
+        auto now = std::chrono::steady_clock::now();
+        phases.push_back({phase, std::chrono::duration<double>(now - last).count()});
+        last = now;
+    }
+};
+inline phase_timer build_phases;
 
 /// The masked Burrows-Wheeler transform in a plain form, from which the indexes are built.
 struct mbwt {
@@ -417,13 +457,16 @@ std::vector<qsint_t> suffix_array_qsufsort(const std::string &ms) {
 /// Suffix array of the superstring, including the empty suffix, by libsais
 /// (5 bytes per character with 32-bit integers, 9 bytes with 64-bit ones).
 template <typename sa_t>
-std::vector<sa_t> suffix_array_libsais(const std::string &ms) {
+std::vector<sa_t> suffix_array_libsais(const std::string &ms, unsigned threads = 1) {
     std::vector<uint8_t> codes(ms.size());
-    for (size_t i = 0; i < ms.size(); ++i) {
-        codes[i] = nucleotideToInt[(uint8_t)ms[i]];
-    }
+    parallel_chunks(ms.size(), threads, parallel_chunk(1), [&](size_t begin, size_t end, unsigned) {
+        for (size_t i = begin; i < end; ++i) {
+            codes[i] = nucleotideToInt[(uint8_t)ms[i]];
+        }
+    });
     std::vector<sa_t> sa(ms.size() + 1);
     sa[0] = (sa_t)ms.size();
+    build_phases.lap("encode");
     int64_t status;
     if constexpr (sizeof(sa_t) == 4) {
         status = libsais(codes.data(), sa.data() + 1, (int32_t)ms.size(), 0, nullptr);
@@ -433,44 +476,56 @@ std::vector<sa_t> suffix_array_libsais(const std::string &ms) {
     if (status != 0) {
         throw std::runtime_error("libsais failed to construct the suffix array");
     }
+    build_phases.lap("suffix_array");
     return sa;
 }
 
 template <typename T, typename sa_t>
-mbwt mbwt_from_suffix_array(std::string &ms, const sa_t *sa, int k, bool use_klcp) {
+mbwt mbwt_from_suffix_array(std::string &ms, const sa_t *sa, int k, bool use_klcp, unsigned threads = 1) {
     mbwt result;
     if (use_klcp) {
-        result.klcp = construct_klcp<T, sa_t>(sa, ms, k-1);
+        result.klcp = construct_klcp<T, sa_t>(sa, ms, k-1, threads);
+        build_phases.lap("klcp");
     }
 
     result.sa_transformed_mask = sdsl::bit_vector(ms.size() + 1);
     result.bwt.resize(ms.size() + 1);
-    for (size_t i = 0; i <= ms.size(); ++i) {
-        size_t sa_i = sa[i];
-        if (sa_i == 0) {
-            result.dollar_position = i;
-        } else {
-            result.bwt[i] = nucleotideToInt[(uint8_t)ms[sa_i - 1]];
+    // A chunk is a whole number of 64-bit words of the mask. The characters next to the suffixes
+    // a few steps ahead are prefetched, as the suffixes start anywhere in the superstring.
+    parallel_chunks(ms.size() + 1, threads, parallel_chunk(64), [&](size_t begin, size_t end, unsigned) {
+        const char *text = ms.data();
+        byte *bwt = result.bwt.data();
+        uint64_t *mask = result.sa_transformed_mask.data();
+        for (size_t i = begin; i < end; ++i) {
+            if (i + PREFETCH_DISTANCE <= ms.size()) __builtin_prefetch(text + sa[i + PREFETCH_DISTANCE]);
+            size_t sa_i = sa[i];
+            if (sa_i == 0) {
+                result.dollar_position = i;
+            } else {
+                bwt[i] = nucleotideToInt[(uint8_t)text[sa_i - 1]];
+            }
+            if (sa_i != ms.size() && is_upper(text[sa_i])) {
+                mask[i >> 6] |= 1ULL << (i & 63);
+            }
         }
-        if (sa_i != ms.size()) {
-            result.sa_transformed_mask[i] = is_upper(ms[sa_i]);
-        }
-    }
+    });
+    build_phases.lap("bwt_mask");
     return result;
 }
 
 /// Compute the MBWT of the masked superstring; libsais is used unless QSufSort is requested.
+/// The threads are used by the loops over the suffix array, and by libsais if it is compiled with OpenMP.
 template <typename T>
-mbwt compute_mbwt(std::string &ms, int k, bool use_klcp, bool use_qsufsort = false) {
+mbwt compute_mbwt(std::string &ms, int k, bool use_klcp, bool use_qsufsort = false, unsigned threads = 1) {
     if (use_qsufsort) {
         auto sa = suffix_array_qsufsort(ms);
-        return mbwt_from_suffix_array<T, qsint_t>(ms, sa.data(), k, use_klcp);
+        return mbwt_from_suffix_array<T, qsint_t>(ms, sa.data(), k, use_klcp, threads);
     } else if (ms.size() < (size_t)INT32_MAX) {
-        auto sa = suffix_array_libsais<int32_t>(ms);
-        return mbwt_from_suffix_array<T, int32_t>(ms, sa.data(), k, use_klcp);
+        auto sa = suffix_array_libsais<int32_t>(ms, threads);
+        return mbwt_from_suffix_array<T, int32_t>(ms, sa.data(), k, use_klcp, threads);
     } else {
-        auto sa = suffix_array_libsais<int64_t>(ms);
-        return mbwt_from_suffix_array<T, int64_t>(ms, sa.data(), k, use_klcp);
+        auto sa = suffix_array_libsais<int64_t>(ms, threads);
+        return mbwt_from_suffix_array<T, int64_t>(ms, sa.data(), k, use_klcp, threads);
     }
 }
 

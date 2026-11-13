@@ -12,6 +12,7 @@
 //  - the SA intervals of all short patterns are tabulated when the index is loaded,
 //  - k-mers are searched in lockstep, each step prefetching the cache lines of the next one.
 
+#include <array>
 #include <algorithm>
 #include <chrono>
 #include <fstream>
@@ -158,20 +159,30 @@ inline void update_range(const index &ix, size_t &i, size_t &j, byte c) {
 }
 
 /// Build the index from the MBWT, which is consumed.
-void build(index &ix, mbwt &m, int k, mask_kind mask_type, uint32_t bwt_block_bytes = 64) {
+void build(index &ix, mbwt &m, int k, mask_kind mask_type, uint32_t bwt_block_bytes = 64, unsigned threads = 1) {
     ix.k = k;
     ix.size = m.bwt.size();
     ix.dollar_position = m.dollar_position;
     ix.klcp = std::move(m.klcp);
 
     ix.bwt = quad_sequence(m.bwt.size(), bwt_block_bytes);
+    std::vector<std::array<uint64_t, 4>> counted(threads, std::array<uint64_t, 4>{0, 0, 0, 0});
+    // Four symbols make a byte, so the threads write to different bytes.
+    parallel_chunks(m.bwt.size(), threads, parallel_chunk(4), [&](size_t begin, size_t end, unsigned thread) {
+        uint64_t local[4] = {0, 0, 0, 0};
+        for (size_t i = begin; i < end; ++i) {
+            ix.bwt.set(i, m.bwt[i]);
+            local[m.bwt[i]]++;
+        }
+        for (int c = 0; c < 4; ++c) counted[thread][c] += local[c];
+    });
     uint64_t totals[4] = {0, 0, 0, 0};
-    for (size_t i = 0; i < m.bwt.size(); ++i) {
-        ix.bwt.set(i, m.bwt[i]);
-        totals[m.bwt[i]]++;
+    for (const auto &part : counted) {
+        for (int c = 0; c < 4; ++c) totals[c] += part[c];
     }
-    ix.bwt.finalize();
+    ix.bwt.finalize(threads);
     m.bwt = std::vector<byte>();
+    build_phases.lap("pack_bwt");
     // The count of A includes the dollar, which stands for the smallest suffix.
     ix.counts[0] = 1;
     ix.counts[1] = totals[0];
@@ -181,10 +192,14 @@ void build(index &ix, mbwt &m, int k, mask_kind mask_type, uint32_t bwt_block_by
     ix.mask_type = mask_type;
     if (mask_type == mask_kind::plain) {
         ix.mask = bit_rank(m.sa_transformed_mask.size());
-        for (size_t i = 0; i < m.sa_transformed_mask.size(); ++i) {
-            if (m.sa_transformed_mask[i]) ix.mask.set(i);
-        }
-        ix.mask.finalize();
+        // A chunk is a whole number of blocks of the mask.
+        parallel_chunks(m.sa_transformed_mask.size(), threads, parallel_chunk(bit_rank::BLOCK_BITS),
+                        [&](size_t begin, size_t end, unsigned) {
+                            for (size_t i = begin; i < end; ++i) {
+                                if (m.sa_transformed_mask[i]) ix.mask.set(i);
+                            }
+                        });
+        ix.mask.finalize(threads);
     } else if (mask_type == mask_kind::packed) {
         ix.mask_packed.build(m.sa_transformed_mask.size(), [&](size_t i) { return (bool)m.sa_transformed_mask[i]; });
     } else {
@@ -192,6 +207,7 @@ void build(index &ix, mbwt &m, int k, mask_kind mask_type, uint32_t bwt_block_by
         ix.mask_rrr_rank = sdsl::rank_support_rrr<1, RRR_BLOCK_SIZE>(&ix.mask_rrr);
     }
     m.sa_transformed_mask.resize(0);
+    build_phases.lap("pack_mask");
 }
 
 static const char MAGIC[8] = {'F', 'M', 'S', 'I', '2', 'I', 'D', 'X'};

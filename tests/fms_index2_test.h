@@ -1,5 +1,7 @@
 #pragma once
 
+#include <filesystem>
+#include <fstream>
 #include <map>
 #include <random>
 #include <set>
@@ -211,6 +213,40 @@ TEST(FMS_INDEX2, MATCHES_SUFFIX_ARRAY_CONSTRUCTIONS) {
         EXPECT_EQ(libsais.klcp, qsufsort.klcp);
         EXPECT_EQ(libsais.dollar_position, qsufsort.dollar_position);
     }
+}
+
+/// The index must not depend on the number of threads that construct it.
+TEST(FMS_INDEX2, CONSTRUCTION_INDEPENDENT_OF_THREADS) {
+    std::mt19937_64 rng(6);
+    // Small chunks, so that the loops over the short test strings are split among the threads.
+    size_t usual_chunk = parallel_chunk_items;
+    parallel_chunk_items = 64;
+    auto file_bytes = [](const std::string &path) {
+        std::ifstream in(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    };
+    std::string path = (std::filesystem::temp_directory_path() / "fmsi2_construction_test").string();
+    for (int round = 0; round < 12; ++round) {
+        size_t k = std::vector<size_t>{2, 5, 13, 31}[round % 4];
+        std::string ms = random_mask(rng, random_superstring(rng, k + 5000 + rng() % 60000), k, round % 2);
+        mbwt single = compute_mbwt<uint64_t>(ms, k, true, false, 1);
+        mbwt threaded = compute_mbwt<uint64_t>(ms, k, true, false, 3);
+        ASSERT_EQ(single.bwt, threaded.bwt);
+        ASSERT_EQ(single.sa_transformed_mask, threaded.sa_transformed_mask);
+        ASSERT_EQ(single.klcp, threaded.klcp);
+        ASSERT_EQ(single.dollar_position, threaded.dollar_position);
+
+        auto mask_type = (fmsi2::mask_kind)(round % 3);
+        fmsi2::index a, b;
+        fmsi2::build(a, single, k, mask_type, 64 << (round % 3), 1);
+        fmsi2::build(b, threaded, k, mask_type, 64 << (round % 3), 5);
+        fmsi2::save(a, path + ".1");
+        fmsi2::save(b, path + ".5");
+        ASSERT_EQ(file_bytes(path + ".1"), file_bytes(path + ".5")) << "round " << round;
+    }
+    std::filesystem::remove(path + ".1");
+    std::filesystem::remove(path + ".5");
+    parallel_chunk_items = usual_chunk;
 }
 
 /// Membership of all query k-mers must agree with the definition, for any mask.

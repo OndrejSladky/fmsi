@@ -7,6 +7,7 @@
 // superblock array that stays in the cache). This follows the one-line rank of
 // SBWT-squeeze (Diseth et al., 2026) and QuadRank (Groot Koerkamp, 2026).
 
+#include "parallel.h"
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -196,22 +197,36 @@ class quad_rank {
     }
 
     /// Compute the rank counts; to be called once after all symbols are set.
-    void finalize() {
+    void finalize(unsigned threads = 1) {
+        // The counts of a block are relative to its superblock, so the superblocks are counted independently
+        // and their totals are summed up afterwards.
+        size_t count = (blocks_.size() + SUPER_BLOCKS - 1) / SUPER_BLOCKS;
         supers_.assign(blocks_.size() / SUPER_BLOCKS + 1, super_block{{0, 0, 0, 0}});
-        uint64_t totals[4] = {0, 0, 0, 0};
-        for (size_t b = 0; b < blocks_.size(); ++b) {
-            auto &super = supers_[b / SUPER_BLOCKS];
-            if (b % SUPER_BLOCKS == 0) {
-                for (int c = 0; c < 4; ++c) super.counts[c] = totals[c];
-            }
-            for (size_t r = 0; r < BLOCK_SYMBOLS; ++r) {
-                if (r == LEFT_SYMBOLS) {
-                    for (int c = 0; c < 4; ++c) {
-                        uint16_t count = (uint16_t)(totals[c] - super.counts[c]);
-                        memcpy(blocks_[b].bytes + COUNTS_BYTE + 2 * c, &count, 2);
+        std::vector<super_block> sums(count, super_block{{0, 0, 0, 0}});
+        size_t chunk = std::max<size_t>(1, parallel_chunk_items / (SUPER_BLOCKS * BLOCK_SYMBOLS));
+        parallel_chunks(count, threads, chunk, [&](size_t begin, size_t end, unsigned) {
+            for (size_t s = begin; s < end; ++s) {
+                uint64_t totals[4] = {0, 0, 0, 0};
+                size_t last = std::min(blocks_.size(), (s + 1) * SUPER_BLOCKS);
+                for (size_t b = s * SUPER_BLOCKS; b < last; ++b) {
+                    for (size_t r = 0; r < BLOCK_SYMBOLS; ++r) {
+                        if (r == LEFT_SYMBOLS) {
+                            for (int c = 0; c < 4; ++c) {
+                                uint16_t relative = (uint16_t)totals[c];
+                                memcpy(blocks_[b].bytes + COUNTS_BYTE + 2 * c, &relative, 2);
+                            }
+                        }
+                        totals[(blocks_[b].bytes[byte_of(r)] >> (2 * (r % 4))) & 3]++;
                     }
                 }
-                totals[(blocks_[b].bytes[byte_of(r)] >> (2 * (r % 4))) & 3]++;
+                for (int c = 0; c < 4; ++c) sums[s].counts[c] = totals[c];
+            }
+        });
+        uint64_t totals[4] = {0, 0, 0, 0};
+        for (size_t s = 0; s < count; ++s) {
+            for (int c = 0; c < 4; ++c) {
+                supers_[s].counts[c] = totals[c];
+                totals[c] += sums[s].counts[c];
             }
         }
     }
@@ -317,8 +332,8 @@ class quad_sequence {
         visit([&](auto &ranks) { ranks.set(i, c); });
     }
 
-    void finalize() {
-        visit([](auto &ranks) { ranks.finalize(); });
+    void finalize(unsigned threads = 1) {
+        visit([&](auto &ranks) { ranks.finalize(threads); });
     }
 
     inline void prefetch(size_t i) const {
@@ -379,15 +394,29 @@ class bit_rank {
     }
 
     /// Compute the rank counts; to be called once after all bits are set.
-    void finalize() {
+    void finalize(unsigned threads = 1) {
+        // As in quad_rank: the superblocks are counted independently and their totals summed up afterwards.
+        size_t count = (blocks_.size() + SUPER_BLOCKS - 1) / SUPER_BLOCKS;
         supers_.assign(blocks_.size() / SUPER_BLOCKS + 1, 0);
+        std::vector<uint64_t> sums(count, 0);
+        size_t chunk = std::max<size_t>(1, parallel_chunk_items / (SUPER_BLOCKS * BLOCK_BITS));
+        parallel_chunks(count, threads, chunk, [&](size_t begin, size_t end, unsigned) {
+            for (size_t s = begin; s < end; ++s) {
+                uint64_t total = 0;
+                size_t last = std::min(blocks_.size(), (s + 1) * SUPER_BLOCKS);
+                for (size_t b = s * SUPER_BLOCKS; b < last; ++b) {
+                    uint64_t ones = 0;
+                    for (int w = 0; w < 8; ++w) ones += __builtin_popcountll(blocks_[b].words[w]);
+                    blocks_[b].words[0] |= total;
+                    total += ones;
+                }
+                sums[s] = total;
+            }
+        });
         uint64_t total = 0;
-        for (size_t b = 0; b < blocks_.size(); ++b) {
-            if (b % SUPER_BLOCKS == 0) supers_[b / SUPER_BLOCKS] = total;
-            uint64_t ones = 0;
-            for (int w = 0; w < 8; ++w) ones += __builtin_popcountll(blocks_[b].words[w]);
-            blocks_[b].words[0] |= total - supers_[b / SUPER_BLOCKS];
-            total += ones;
+        for (size_t s = 0; s < count; ++s) {
+            supers_[s] = total;
+            total += sums[s];
         }
     }
 

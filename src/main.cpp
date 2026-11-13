@@ -396,7 +396,8 @@ static int usage_index2() {
   std::cerr << "    -c INT  - bytes per block of the BWT: 64 (the fastest), 128 or 256 (the smallest) [default: 64]" << std::endl;
   std::cerr << "    -l      - also construct the kLCP array (1 bit per character), which speeds up streamed queries" << std::endl;
   std::cerr << "    -o STR  - prefix of the index file [default: path to the masked superstring]" << std::endl;
-  std::cerr << "    -Q      - construct the suffix array by QSufSort instead of libsais." << std::endl << std::endl;
+  std::cerr << "    -Q      - construct the suffix array by QSufSort instead of libsais." << std::endl;
+  std::cerr << "    -t INT  - number of threads [default: 1]" << std::endl << std::endl;
   std::cerr << "The index is written to <prefix>.fmsi2 and the kLCP array to <prefix>.fmsi2.klcp." << std::endl << std::endl;
   return 1;
 }
@@ -435,7 +436,8 @@ int ms_index2(int argc, char *argv[]) {
   fmsi2::mask_kind mask_type = fmsi2::mask_kind::plain;
   int block_bytes = 64;
   bool use_klcp = false;
-  while ((c = getopt(argc, argv, "hk:m:c:lo:Q")) >= 0) {
+  int threads = 1;
+  while ((c = getopt(argc, argv, "hk:m:c:lo:Qt:")) >= 0) {
     switch (c) {
     case 'h':
       usage = true;
@@ -471,6 +473,13 @@ int ms_index2(int argc, char *argv[]) {
     case 'Q':
       use_qsufsort = true;
       break;
+    case 't':
+      threads = atoi(optarg);
+      if (threads < 1) {
+        std::cerr << "ERROR: The number of threads must be positive." << std::endl;
+        return usage_index2();
+      }
+      break;
     default:
       return usage_index2();
     }
@@ -484,24 +493,26 @@ int ms_index2(int argc, char *argv[]) {
   }
   if (prefix.empty()) prefix = fn;
 
+  build_phases = phase_timer();
   auto ms = read_masked_superstring(fn);
   if (ms.size() == 0) {
     std::cerr << "ERROR: The file '" << fn << "' does not contain a masked superstring." << std::endl;
     return usage_index2();
   }
+  build_phases.lap("read");
   std::cerr << "Read masked superstring of length " << ms.size() << std::endl;
   if (k == 0) {
     k = infer_k(ms);
     std::cerr << "Inferred k from the masked case convention: " << k << std::endl;
   }
 
-  mbwt m = k <= 32 ? compute_mbwt<uint64_t>(ms, k, use_klcp, use_qsufsort)
-                   : compute_mbwt<__uint128_t>(ms, k, use_klcp, use_qsufsort);
+  mbwt m = k <= 32 ? compute_mbwt<uint64_t>(ms, k, use_klcp, use_qsufsort, threads)
+                   : compute_mbwt<__uint128_t>(ms, k, use_klcp, use_qsufsort, threads);
   std::cerr << "Constructed the masked Burrows-Wheeler transform" << std::endl;
   size_t length = ms.size();
   ms = std::string();
   fmsi2::index index;
-  fmsi2::build(index, m, k, mask_type, block_bytes);
+  fmsi2::build(index, m, k, mask_type, block_bytes, threads);
   fmsi2::save(index, prefix + ".fmsi2");
   std::cerr << "Written index: BWT " << index.bwt.bytes() << " bytes (" << 8.0 * index.bwt.bytes() / length
             << " bits per character), mask " << index.mask_bytes() << " bytes ("
@@ -510,6 +521,15 @@ int ms_index2(int argc, char *argv[]) {
     fmsi2::save_klcp(index, prefix + ".fmsi2.klcp");
     std::cerr << "Written kLCP array: 1 bit per character" << std::endl;
   }
+  build_phases.lap("write");
+
+  double total = 0;
+  std::cerr << "[fmsi2-build]";
+  for (const auto &phase : build_phases.phases) {
+    std::cerr << "\t" << phase.first << "_s=" << phase.second;
+    total += phase.second;
+  }
+  std::cerr << "\ttotal_s=" << total << std::endl;
   return 0;
 }
 
