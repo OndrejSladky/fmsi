@@ -34,11 +34,22 @@ enum class mask_kind : uint32_t {
     packed = 2,
 };
 
+/// A position that is not a row.
+static constexpr uint64_t NO_ROW = ~(uint64_t)0;
+
 struct index {
     uint32_t k = 0;
-    /// Length of the BWT, i.e., the length of the superstring plus one.
+    /// Number of strands of the superstring indexed: 1, or 2 if its reverse complement is indexed too
+    /// (index2 --fast), in which case a k-mer is searched as it is and not as its reverse complement.
+    uint32_t strands = 1;
+    /// Length of the BWT, i.e., the number of suffixes including the empty one.
     uint64_t size = 0;
+    /// Rows whose BWT symbol is a sentinel (stored as A): the one before the text and, if the text consists
+    /// of two strings (the superstring and its reverse complement), the one between them; else NO_ROW.
     uint64_t dollar_position = 0;
+    uint64_t dollar_position2 = NO_ROW;
+    /// counts[c] is the number of suffixes starting with a symbol smaller than c, including those starting
+    /// with a sentinel (the empty suffix and, with two strings, the one starting with the separator).
     uint64_t counts[4] = {0, 0, 0, 0};
     quad_sequence bwt;
     mask_kind mask_type = mask_kind::plain;
@@ -60,6 +71,8 @@ struct index {
     /// the mask, i.e., of hashes.
     uint64_t dollar_rank = 0;
     uint64_t mask_ones = 0;
+    /// The same for the second sentinel (NO_ROW if there is none); the sentinels ordered by their rows.
+    uint64_t dollar_rank2 = NO_ROW;
 
     index() = default;
     index(const index &) = delete;
@@ -162,19 +175,28 @@ struct index {
     }
 };
 
+/// Number of sentinels among the first i symbols of the BWT (they are stored as A).
+inline size_t dollars_before(const index &ix, size_t i) {
+    return (size_t)(i > ix.dollar_position) + (size_t)(i > ix.dollar_position2);
+}
+
 /// Go from range (i,j) for pattern P to range for c+P.
 inline void update_range(const index &ix, size_t &i, size_t &j, byte c) {
     size_t count = ix.counts[c];
     size_t rank_i, rank_j;
     ix.bwt.rank_pair(i, j, c, rank_i, rank_j);
-    // The dollar is stored as A in the BWT.
-    i = count + rank_i - (c == 0 && i > ix.dollar_position);
-    j = count + rank_j - (c == 0 && j > ix.dollar_position);
+    // The sentinels are stored as A in the BWT.
+    size_t dollars_i = c == 0 ? dollars_before(ix, i) : 0, dollars_j = c == 0 ? dollars_before(ix, j) : 0;
+    i = count + rank_i - dollars_i;
+    j = count + rank_j - dollars_j;
 }
 
 /// Set what access needs beyond the stored index and costs nothing.
 inline void prepare_access(index &ix) {
-    ix.dollar_rank = ix.bwt.rank(ix.dollar_position, 0);
+    uint64_t first = std::min(ix.dollar_position, ix.dollar_position2);
+    uint64_t second = std::max(ix.dollar_position, ix.dollar_position2);
+    ix.dollar_rank = ix.bwt.rank(first, 0);
+    ix.dollar_rank2 = second == NO_ROW ? NO_ROW : ix.bwt.rank(second, 0);
     ix.mask_ones = ix.mask_rank(ix.size);
 }
 
@@ -188,6 +210,7 @@ void build(index &ix, mbwt &m, int k, mask_kind mask_type, uint32_t bwt_block_by
     ix.k = k;
     ix.size = m.bwt.size();
     ix.dollar_position = m.dollar_position;
+    ix.dollar_position2 = m.dollar_position2 == mbwt::NO_ROW ? NO_ROW : m.dollar_position2;
     ix.klcp = std::move(m.klcp);
 
     ix.bwt = quad_sequence(m.bwt.size(), bwt_block_bytes);
@@ -208,8 +231,8 @@ void build(index &ix, mbwt &m, int k, mask_kind mask_type, uint32_t bwt_block_by
     ix.bwt.finalize(threads);
     m.bwt = std::vector<byte>();
     build_phases.lap("pack_bwt");
-    // The count of A includes the dollar, which stands for the smallest suffix.
-    ix.counts[0] = 1;
+    // The count of A includes the sentinels, which stand for the smallest suffixes.
+    ix.counts[0] = 1 + (ix.dollar_position2 != NO_ROW);
     ix.counts[1] = totals[0];
     ix.counts[2] = totals[0] + totals[1];
     ix.counts[3] = totals[0] + totals[1] + totals[2];
@@ -237,7 +260,8 @@ void build(index &ix, mbwt &m, int k, mask_kind mask_type, uint32_t bwt_block_by
 }
 
 static const char MAGIC[8] = {'F', 'M', 'S', 'I', '2', 'I', 'D', 'X'};
-static const uint32_t FORMAT_VERSION = 2;
+/// Version 3 adds the number of strands and the second sentinel; version 2 is read as one strand.
+static const uint32_t FORMAT_VERSION = 3;
 
 void save(const index &ix, const std::string &path) {
     std::ofstream out(path, std::ios::binary);
@@ -245,8 +269,10 @@ void save(const index &ix, const std::string &path) {
     out.write(MAGIC, sizeof(MAGIC));
     write_pod(out, FORMAT_VERSION);
     write_pod(out, ix.k);
+    write_pod(out, ix.strands);
     write_pod(out, ix.size);
     write_pod(out, ix.dollar_position);
+    write_pod(out, ix.dollar_position2);
     for (int c = 0; c < 4; ++c) write_pod(out, ix.counts[c]);
     write_pod(out, (uint32_t)ix.mask_type);
     ix.bwt.write(out);
@@ -266,12 +292,17 @@ void load(index &ix, const std::string &path) {
     in.read(magic, sizeof(MAGIC));
     uint32_t version = 0, mask_type = 0;
     read_pod(in, version);
-    if (!in || memcmp(magic, MAGIC, sizeof(MAGIC)) != 0 || version != FORMAT_VERSION) {
+    if (!in || memcmp(magic, MAGIC, sizeof(MAGIC)) != 0 || version < 2 || version > FORMAT_VERSION) {
         throw std::invalid_argument("file " + path + " is not an FMSI 2 index of a supported version");
     }
     read_pod(in, ix.k);
+    ix.strands = 1;
+    if (version >= 3) read_pod(in, ix.strands);
     read_pod(in, ix.size);
     read_pod(in, ix.dollar_position);
+    ix.dollar_position2 = NO_ROW;
+    if (version >= 3) read_pod(in, ix.dollar_position2);
+    if (ix.strands != 1 && ix.strands != 2) throw std::invalid_argument("file " + path + " has an unsupported number of strands");
     for (int c = 0; c < 4; ++c) read_pod(in, ix.counts[c]);
     read_pod(in, mask_type);
     ix.mask_type = (mask_kind)mask_type;
@@ -752,8 +783,10 @@ inline uint8_t first_symbol(const index &ix, size_t row) {
 /// the occurrence at the row of the suffix shortened by this c. Selecting it inverts update_range.
 inline size_t next_row_rank(const index &ix, size_t row, uint8_t c) {
     size_t r = row - ix.counts[c];
-    // The dollar is stored as A in the BWT without being an occurrence of A.
-    return r + (c == 0 && r >= ix.dollar_rank);
+    if (c != 0) return r;
+    // The sentinels are stored as A in the BWT without being occurrences of A.
+    r += r >= ix.dollar_rank;
+    return r + (r >= ix.dollar_rank2);
 }
 
 /// Access: the k-mer with the given hash, i.e., the k-mer at the set occurrence number [hash] (from 0)

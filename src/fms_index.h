@@ -442,6 +442,9 @@ struct mbwt {
     sdsl::bit_vector sa_transformed_mask;
     sdsl::bit_vector klcp;
     size_t dollar_position = 0;
+    /// The row of the second sentinel, if the text has two (the doubled text of FMSI 2 --fast), or NO_ROW.
+    static constexpr size_t NO_ROW = ~(size_t)0;
+    size_t dollar_position2 = NO_ROW;
 };
 
 /// Suffix array of the superstring, including the empty suffix, by QSufSort (16 bytes per character).
