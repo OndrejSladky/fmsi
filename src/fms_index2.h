@@ -159,13 +159,21 @@ struct index {
 
     inline bool has_klcp() const { return klcp.size() > 0; }
 
-    inline void klcp_prefetch(size_t i, size_t j) const {
+    /// Whether the kLCP bits of rows i - 1 and i are unset, i.e., the first k - 1 characters of row i are those
+    /// of no other row, so that klcp_widen leaves the interval [i, i + 1) as it is (i > 0).
+    FMSI2_INLINE bool klcp_single(size_t i) const {
+        const uint64_t *words = klcp.data();
+        const size_t q = i - 1;
+        return (((words[q >> 6] >> (q & 63)) | (words[i >> 6] >> (i & 63) << 1)) & 3) == 0;
+    }
+
+    FMSI2_INLINE void klcp_prefetch(size_t i, size_t j) const {
         __builtin_prefetch(klcp.data() + ((i - 1) >> 6));
         __builtin_prefetch(klcp.data() + ((j - 1) >> 6));
     }
 
     /// Go from the interval of a string of at least k - 1 characters to the one of its first k - 1 characters.
-    inline void klcp_widen(size_t &i, size_t &j) const {
+    FMSI2_INLINE void klcp_widen(size_t &i, size_t &j) const {
         const uint64_t *words = klcp.data();
         // The first unset bit from j - 1 on; the last bit of the array is unset.
         size_t w = (j - 1) >> 6;
@@ -749,25 +757,36 @@ void lookup_streaming(const index &ix, const ranks_t &bwt, const char *sequence,
         uint8_t reverse, second, exact;
     };
     // Go from the interval of P to that of c P, with the rank structure given.
-    auto extend = [&](size_t &i, size_t &j, byte c) {
+    auto extend = [&](size_t &i, size_t &j, byte c) FMSI2_INLINE_LAMBDA {
         size_t rank_i, rank_j;
-        bwt.rank_pair(i, j, c, rank_i, rank_j);
+        bwt.rank_pair_near(i, j, c, rank_i, rank_j);
         size_t dollars_i = c == 0 ? dollars_before(ix, i) : 0, dollars_j = c == 0 ? dollars_before(ix, j) : 0;
         i = ix.counts[c] + rank_i - dollars_i;
         j = ix.counts[c] + rank_j - dollars_j;
     };
+    // The same for the interval [i, i + 1) of a single row: the row is followed if its symbol is c (and
+    // not a sentinel, stored as A).
+    auto extend_single = [&](size_t &i, size_t &j, byte c) FMSI2_INLINE_LAMBDA {
+        uint8_t symbol;
+        const size_t rank_i = bwt.rank_symbol(i, c, symbol);
+        const bool follows = symbol == c && !(c == 0 && (i == ix.dollar_position || i == ix.dollar_position2));
+        const size_t dollars_i = c == 0 ? dollars_before(ix, i) : 0;
+        i = ix.counts[c] + rank_i - dollars_i;
+        j = i + follows;
+    };
+    const bool plain_mask = ix.mask_type == mask_kind::plain;
     std::vector<slot> slots(std::max(1u, batch_size));
     size_t next = 0, active = slots.size();
     int score = 0;
     uint64_t found = 0, steps = 0, kmers = 0, searches = 0, rechecks = 0;
 
     // Character of the strand at position v, and the result of its window y.
-    auto symbol = [&](const slot &s, int v) -> byte {
+    auto symbol = [&](const slot &s, int v) FMSI2_INLINE_LAMBDA -> byte {
         return !one_strand && s.reverse ? 3 - nucleotideToInt[(uint8_t)s.sequence[s.length - 1 - v]]
                          : nucleotideToInt[(uint8_t)s.sequence[v]];
     };
-    auto result = [&](const slot &s, int y) -> out_t & { return s.out[!one_strand && s.reverse ? s.windows - 1 - y : y]; };
-    auto unresolved = [&](const slot &s, int y) {
+    auto result = [&](const slot &s, int y) FMSI2_INLINE_LAMBDA -> out_t & { return s.out[!one_strand && s.reverse ? s.windows - 1 - y : y]; };
+    auto unresolved = [&](const slot &s, int y) FMSI2_INLINE_LAMBDA {
         out_t value = result(s, y);
         return value == UNRESOLVED || (s.second && value == ABSENT[0]);
     };
@@ -871,14 +890,24 @@ void lookup_streaming(const index &ix, const ranks_t &bwt, const char *sequence,
             }
         }
     };
-    auto to_check = [&](slot &s) {
+    auto to_check = [&](slot &s) FMSI2_INLINE_LAMBDA {
         s.state = CHECK;
-        s.hint = ix.mask_prefetch(s.i);
+        if (plain_mask) {
+            ix.mask.prefetch(s.i);
+        } else {
+            s.hint = ix.mask_prefetch(s.i);
+        }
         bwt.prefetch(s.i);
-        bwt.prefetch(s.j);
-        if (klcp) ix.klcp_prefetch(s.i, s.j);
+        if (s.j - s.i > 1) {
+            bwt.prefetch(s.j);
+            if (klcp) ix.klcp_prefetch(s.i, s.j);
+        } else if (klcp) {
+            // The kLCP bits of rows i - 1 and i, in one word unless i starts one.
+            ix.klcp_prefetch(s.i, s.i);
+            if ((s.i & 63) == 0) ix.klcp_prefetch(s.j, s.j);
+        }
     };
-    auto after_search_step = [&](slot &s) {
+    auto after_search_step = [&](slot &s) FMSI2_INLINE_LAMBDA {
         if (s.i == s.j) {
             search_failed(s);
         } else if (s.t == k) {
@@ -891,12 +920,12 @@ void lookup_streaming(const index &ix, const ranks_t &bwt, const char *sequence,
         }
     };
     // The interval is the one of a string starting with window x: resolve the window and go to the next one.
-    auto check = [&](slot &s) {
-        if (ix.mask_any(s.i, s.j, s.hint)) {
+    auto check = [&](slot &s) FMSI2_INLINE_LAMBDA {
+        if (plain_mask && s.j == s.i + 1 ? ix.mask[s.i] : ix.mask_any(s.i, s.j, s.hint)) {
             // No bit is set between the start of the interval and its first set bit.
             result(s, s.x) = hashes ? (out_t)ix.mask_rank(s.i) : (out_t)1;
             ++found;
-            ++s.hits[s.reverse];
+            if (!one_strand) ++s.hits[s.reverse];
         } else if (!s.exact) {
             // Other occurrences of the k-mer may be set in the mask.
             ++rechecks;
@@ -919,9 +948,14 @@ void lookup_streaming(const index &ix, const ranks_t &bwt, const char *sequence,
             return;
         }
         --s.x;
-        // With the kLCP array, drop the last character of the k-mer first, so that the match stays a k-mer.
-        if (klcp) ix.klcp_widen(s.i, s.j);
-        extend(s.i, s.j, symbol(s, s.x));
+        // With the kLCP array, drop the last character of the k-mer first, so that the match stays a k-mer. Most
+        // matches are a single row that this leaves as it is.
+        if (s.j == s.i + 1 && (!klcp || ix.klcp_single(s.i))) {
+            extend_single(s.i, s.j, symbol(s, s.x));
+        } else {
+            if (klcp) ix.klcp_widen(s.i, s.j);
+            extend(s.i, s.j, symbol(s, s.x));
+        }
         ++steps;
         if (s.i != s.j) {
             s.exact = klcp;
@@ -945,7 +979,11 @@ void lookup_streaming(const index &ix, const ranks_t &bwt, const char *sequence,
                 after_search_step(s);
                 break;
             case SEARCH:
-                extend(s.i, s.j, symbol(s, s.x + k - 1 - s.t));
+                if (s.j == s.i + 1) {
+                    extend_single(s.i, s.j, symbol(s, s.x + k - 1 - s.t));
+                } else {
+                    extend(s.i, s.j, symbol(s, s.x + k - 1 - s.t));
+                }
                 ++s.t;
                 ++steps;
                 after_search_step(s);

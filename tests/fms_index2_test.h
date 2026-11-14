@@ -127,13 +127,21 @@ void test_quad_rank() {
         size_t counts[4] = {0, 0, 0, 0};
         for (size_t i = 0; i <= size; ++i) {
             for (int c = 0; c < 4; ++c) ASSERT_EQ(ranks.rank(i, c), counts[c]) << "size " << size << " position " << i;
-            for (size_t distance : {0, 1, 2, 30, 250, 1100}) {
+            for (size_t distance : {0, 1, 2, 3, 5, 17, 27, 28, 29, 30, 250, 1100}) {
                 if (i + distance > size) continue;
                 size_t rank_i, rank_j;
                 uint8_t c = rng() % 4;
                 ranks.rank_pair(i, i + distance, c, rank_i, rank_j);
                 ASSERT_EQ(rank_i, ranks.rank(i, c));
                 ASSERT_EQ(rank_j, ranks.rank(i + distance, c));
+                if (distance == 0) continue;
+                ranks.rank_pair_near(i, i + distance, c, rank_i, rank_j);
+                ASSERT_EQ(rank_i, ranks.rank(i, c));
+                ASSERT_EQ(rank_j, ranks.rank(i + distance, c)) << "size " << size << " position " << i << " distance "
+                                                                << distance;
+                uint8_t symbol;
+                ASSERT_EQ(ranks.rank_symbol(i, c, symbol), rank_i);
+                if (i < size) ASSERT_EQ(symbol, symbols[i]);
             }
             if (i < size) {
                 ASSERT_EQ(ranks[i], symbols[i]);
@@ -622,6 +630,69 @@ TEST(FMS_INDEX2, FAST_HASHES_AND_ACCESS) {
             std::string kmer = batched.substr(h * k, k);
             ASSERT_TRUE(hash_of.count(kmer)) << "k " << k << " round " << round;
             ASSERT_EQ(hash_of[kmer], (int64_t)h);
+        }
+    }
+}
+
+/// Streaming on an index of both strands (a loop of its own for k <= 32) agrees with the lookups on mosaic
+/// reads: pieces of the superstring on both strands, random stretches and substitutions at several rates, more
+/// reads than slots. The hashes agree too if every k-mer has one set occurrence.
+TEST(FMS_INDEX2, FAST_STREAMING_MOSAICS) {
+    std::mt19937_64 rng(11);
+    for (int round = 0; round < 24; ++round) {
+        size_t k = std::vector<size_t>{3, 5, 11, 15, 21, 31, 32}[rng() % 7];
+        bool single = round % 2;
+        std::string ms = random_mask(rng, random_superstring(rng, k + rng() % 30000), k, single);
+        std::string superstring = ms;
+        for (auto &c : superstring) c = toupper(c);
+        auto represented = represented_kmers(ms, k);
+        queries q;
+        for (int r = 0; r < 300; ++r) {
+            size_t length = k + rng() % 300;
+            unsigned per_mille = std::vector<unsigned>{0, 5, 20, 100}[rng() % 4];
+            std::string read;
+            while (read.size() < length) {
+                size_t piece = 1 + rng() % 120;
+                if (rng() % 4 == 0) {
+                    read += random_dna(rng, piece);
+                } else {
+                    std::string s = superstring.substr(rng() % superstring.size(), piece);
+                    read += rng() % 2 ? reverse_complement(s) : s;
+                }
+            }
+            read.resize(length);
+            for (auto &c : read) {
+                if (rng() % 1000 < per_mille) c = "ACGT"[rng() % 4];
+            }
+            q.segments.push_back({(uint32_t)q.sequences.size(), (uint32_t)read.size()});
+            for (size_t i = 0; i + k <= read.size(); ++i) q.offsets.push_back(q.sequences.size() + i);
+            q.sequences += read;
+        }
+        for (bool klcp : {false, true}) {
+            mbwt m = doubled::compute_mbwt(ms, k, klcp);
+            fmsi2::index index;
+            fmsi2::build(index, m, k, (fmsi2::mask_kind)(round / 2 % 3), 64 << (round % 3));
+            for (unsigned table : {0u, 4u, 12u}) {
+                fmsi2::build_prefix_table(index, table);
+                for (unsigned batch : {1u, 5u, 64u}) {
+                    fmsi2::lookup_stats stats;
+                    std::vector<int64_t> looked_up(q.sequences.size(), -1), streamed(q.sequences.size(), -1);
+                    fmsi2::lookup_batch<true, int64_t>(index, q.sequences.data(), q.offsets.data(), q.offsets.size(),
+                                                       looked_up.data(), batch, stats);
+                    fmsi2::lookup_streaming<true, int64_t>(index, q.sequences.data(), q.segments.data(),
+                                                           q.segments.size(), streamed.data(), batch, stats);
+                    ASSERT_EQ(stats.kmers, 2 * q.offsets.size());
+                    for (uint32_t offset : q.offsets) {
+                        bool want = represented.count(canonical(q.sequences.substr(offset, k)));
+                        std::string where = "k " + std::to_string(k) + " round " + std::to_string(round) + " kLCP " +
+                                            std::to_string(klcp) + " table " + std::to_string(table) + " batch " +
+                                            std::to_string(batch) + " offset " + std::to_string(offset);
+                        ASSERT_EQ(looked_up[offset] >= 0, want) << where;
+                        ASSERT_EQ(streamed[offset] >= 0, want) << where << " (streaming)";
+                        if (single) ASSERT_EQ(streamed[offset], looked_up[offset]) << where << " (hash)";
+                    }
+                }
+            }
         }
     }
 }

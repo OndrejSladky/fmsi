@@ -25,6 +25,11 @@
 #define FMSI2_NEON 1
 #endif
 
+/// Forces the inlining of what the search loops call at every step: otherwise the compiler may call the rank of
+/// a block out of line, at the cost of a call and of the constants of the loop.
+#define FMSI2_INLINE inline __attribute__((always_inline))
+#define FMSI2_INLINE_LAMBDA __attribute__((always_inline))
+
 #ifndef FMSI2_HINT_STEP
 #define FMSI2_HINT_STEP 128
 #endif
@@ -196,23 +201,23 @@ class quad_rank {
     aligned_array<block_t> blocks_;
     std::vector<super_block> supers_;
 
-    static inline size_t byte_of(size_t r) { return r / 4 + (r >= LEFT_SYMBOLS ? 8 : 0); }
+    static FMSI2_INLINE size_t byte_of(size_t r) { return r / 4 + (r >= LEFT_SYMBOLS ? 8 : 0); }
 
-    static inline uint16_t count_before_middle(const block_t &block, uint8_t c) {
+    static FMSI2_INLINE uint16_t count_before_middle(const block_t &block, uint8_t c) {
         uint16_t count;
         memcpy(&count, block.bytes + COUNTS_BYTE + 2 * c, 2);
         return count;
     }
 
     /// The bits 2t of the byte are set for its symbols equal to c.
-    static inline uint8_t matches(uint8_t byte, uint8_t c) {
+    static FMSI2_INLINE uint8_t matches(uint8_t byte, uint8_t c) {
         uint8_t x = byte ^ (uint8_t)(0x55 * (c ^ 3));
         return x & (x >> 1) & 0x55;
     }
 
     /// Number of occurrences of c among the first r symbols of the block, relative to its middle
     /// (negative in the left half). Branch-free on purpose: the position in the block is unpredictable.
-    static inline int64_t count_from_middle(const block_t &block, size_t r, uint8_t c) {
+    static FMSI2_INLINE int64_t count_from_middle(const block_t &block, size_t r, uint8_t c) {
         const bool right = r >= LEFT_SYMBOLS;
         // The half is scanned as BYTES / 2 bytes starting at [base]; in the left half, these include the
         // counts, which are never selected. The selected bytes are [first, first + selected) of them: from
@@ -291,13 +296,13 @@ class quad_rank {
         }
     }
 
-    inline uint8_t operator[](size_t i) const {
+    FMSI2_INLINE uint8_t operator[](size_t i) const {
         size_t r = i % BLOCK_SYMBOLS;
         return (blocks_[i / BLOCK_SYMBOLS].bytes[byte_of(r)] >> (2 * (r % 4))) & 3;
     }
 
     /// Prefetch the cache lines read by rank(i, c): those from the position to the counts.
-    inline void prefetch(size_t i) const {
+    FMSI2_INLINE void prefetch(size_t i) const {
         const uint8_t *block = blocks_[i / BLOCK_SYMBOLS].bytes;
         size_t line = byte_of(i % BLOCK_SYMBOLS) / 64, counts_line = COUNTS_BYTE / 64;
         __builtin_prefetch(block + 64 * counts_line);
@@ -305,18 +310,51 @@ class quad_rank {
         if (BYTES > 128) __builtin_prefetch(block + 64 * ((line + counts_line + 1) / 2));
     }
 
-    /// Number of occurrences of c among the first i symbols.
-    inline size_t rank(size_t i, uint8_t c) const {
+    /// Number of occurrences of c among the first i symbols; inlined where the streaming loop calls it.
+    FMSI2_INLINE size_t rank_inlined(size_t i, uint8_t c) const {
         size_t b = i / BLOCK_SYMBOLS;
         const block_t &block = blocks_[b];
         return supers_[b / SUPER_BLOCKS].counts[c] + count_before_middle(block, c) +
                count_from_middle(block, i % BLOCK_SYMBOLS, c);
     }
 
+    /// Number of occurrences of c among the first i symbols.
+    inline size_t rank(size_t i, uint8_t c) const { return rank_inlined(i, c); }
+
     /// Ranks of c at the positions i <= j; cheaper than two rank queries for neighbouring positions.
     inline void rank_pair(size_t i, size_t j, uint8_t c, size_t &rank_i, size_t &rank_j) const {
         rank_i = rank(i, c);
         rank_j = j == i + 1 ? rank_i + ((*this)[i] == c) : rank(j, c);
+    }
+
+    /// rank_pair, with the second rank counted from the first one if both positions are in one half of a block
+    /// and at most 28 apart (most intervals of streaming that are not a single row).
+    FMSI2_INLINE void rank_pair_near(size_t i, size_t j, uint8_t c, size_t &rank_i, size_t &rank_j) const {
+        rank_i = rank_inlined(i, c);
+        const size_t distance = j - i, r = i % BLOCK_SYMBOLS;
+        if (distance == 1) {
+            rank_j = rank_i + ((*this)[i] == c);
+        } else if (distance <= 28 && (r < LEFT_SYMBOLS) == (r + distance - 1 < LEFT_SYMBOLS) &&
+                   r + distance <= BLOCK_SYMBOLS && byte_of(r) + 8 <= BYTES) {
+            // The symbols [r, r + distance) of the block lie in one half, within 8 bytes from that of r: count the
+            // occurrences of c among them in one word.
+            uint64_t word;
+            memcpy(&word, blocks_[i / BLOCK_SYMBOLS].bytes + byte_of(r), 8);
+            const uint64_t x = word ^ (0x5555555555555555ULL * (c ^ 3));
+            const unsigned low = 2 * (r % 4), high = low + 2 * distance;
+            const uint64_t range = ((1ULL << high) - 1) & ~((1ULL << low) - 1);
+            rank_j = rank_i + __builtin_popcountll(x & (x >> 1) & 0x5555555555555555ULL & range);
+        } else {
+            rank_j = rank_inlined(j, c);
+        }
+    }
+
+    /// rank(i, c) and the symbol at position i, from one reading of the block.
+    FMSI2_INLINE size_t rank_symbol(size_t i, uint8_t c, uint8_t &symbol) const {
+        const size_t b = i / BLOCK_SYMBOLS, r = i % BLOCK_SYMBOLS;
+        const block_t &block = blocks_[b];
+        symbol = (block.bytes[byte_of(r)] >> (2 * (r % 4))) & 3;
+        return supers_[b / SUPER_BLOCKS].counts[c] + count_before_middle(block, c) + count_from_middle(block, r, c);
     }
 
   private:
@@ -636,15 +674,15 @@ class bit_rank {
         }
     }
 
-    inline bool operator[](size_t i) const {
+    FMSI2_INLINE bool operator[](size_t i) const {
         size_t p = i % BLOCK_BITS + HEADER_BITS;
         return (blocks_[i / BLOCK_BITS].words[p / 64] >> (p % 64)) & 1;
     }
 
-    inline void prefetch(size_t i) const { __builtin_prefetch(&blocks_[i / BLOCK_BITS]); }
+    FMSI2_INLINE void prefetch(size_t i) const { __builtin_prefetch(&blocks_[i / BLOCK_BITS]); }
 
     /// Number of ones among the first i bits.
-    inline size_t rank(size_t i) const {
+    FMSI2_INLINE size_t rank(size_t i) const {
         size_t b = i / BLOCK_BITS;
         int bits = (int)(i % BLOCK_BITS + HEADER_BITS);
         const bit_block &block = blocks_[b];
