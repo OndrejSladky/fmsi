@@ -513,6 +513,30 @@ TEST(FMS_INDEX2, DOUBLED_MATCHES_NAIVE) {
     parallel_chunk_items = usual_chunk;
 }
 
+/// The lean construction of the doubled text (merging the suffix arrays of X and Y) gives the same MBWT.
+TEST(FMS_INDEX2, DOUBLED_LEAN_SAME_AS_LIBSAIS) {
+    std::mt19937_64 rng(10);
+    size_t usual_chunk = parallel_chunk_items;
+    std::string temporary = (std::filesystem::temp_directory_path() / "fmsi2_lean_test").string();
+    for (int round = 0; round < 60; ++round) {
+        size_t k = 2 + rng() % 31;
+        size_t length = round < 10 ? 1 + rng() % 5 : k + rng() % (round < 30 ? 300 : 20000);
+        std::string ms = random_mask(rng, random_superstring(rng, length), k, round % 2);
+        // Repeats of a few letters, where many suffixes of Y fall between the same suffixes of X.
+        if (round % 7 == 3) ms = random_mask(rng, std::string(length / 2, 'A') + std::string(length - length / 2, 'C'), k, false);
+        bool klcp = round % 3 != 0;
+        mbwt want = doubled::compute_mbwt(ms, k, klcp, 1);
+        for (unsigned threads : {1u, 3u, 8u}) {
+            parallel_chunk_items = threads == 1 ? usual_chunk : 64;
+            mbwt lean = doubled::compute_mbwt_lean(ms, k, klcp, threads, temporary);
+            expect_same_mbwt(lean, want, "k " + std::to_string(k) + " round " + std::to_string(round) + " threads " +
+                                             std::to_string(threads));
+        }
+        parallel_chunk_items = usual_chunk;
+        ASSERT_FALSE(std::filesystem::exists(temporary + ".sa_x"));
+    }
+}
+
 /// With both strands indexed, membership agrees with the definition and with the index of one strand.
 TEST(FMS_INDEX2, FAST_MEMBERSHIP) {
     std::mt19937_64 rng(8);
