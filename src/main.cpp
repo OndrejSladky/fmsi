@@ -33,7 +33,8 @@ static int usage() {
   std::cerr << "    index2  - Creates an index with a cache-friendly layout." << std::endl;
   std::cerr << "    query2  - Queries k-mers against an index2 index in batches." << std::endl;
   std::cerr << "    lookup2 - Return unique hashes of present k-mers using an index2 index." << std::endl;
-  std::cerr << "    access2 - Return the k-mers of hashes using an index2 index." << std::endl << std::endl;
+  std::cerr << "    access2 - Return the k-mers of hashes using an index2 index." << std::endl;
+  std::cerr << "    resave2 - Rewrite an index2 index in the current format (the smaller one on disk)." << std::endl << std::endl;
   std::cerr << "Command (experimental, using f-MS framework):" << std::endl;
   std::cerr << "    union   - Compute union of k-mers from several indices." << std::endl;
   std::cerr << "    inter   - Compute intersection of k-mers from several indices." << std::endl;
@@ -666,7 +667,7 @@ int ms_query2(int argc, char *argv[], bool output_orders) {
   };
 
   fmsi2::index index;
-  fmsi2::load(index, fn + ".fmsi2");
+  fmsi2::load(index, fn + ".fmsi2", threads);
   if (k != 0 && k != (int)index.k) {
     std::cerr << "ERROR: Mismatch. Provided k (" << k << ") does not match the k of the index (" << index.k << ")." << std::endl;
     return usage_query2(output_orders);
@@ -1100,6 +1101,31 @@ int ms_access2(int argc, char *argv[]) {
   return 0;
 }
 
+/// Load an index2 index of any supported version and save it in the current one (format 4: the BWT as 2-bit
+/// characters and the mask as an RRR vector on disk, expanded when loaded). The kLCP array is not touched.
+int ms_resave2(int argc, char *argv[]) {
+  int threads = 1;
+  int c;
+  while ((c = getopt(argc, argv, "t:")) >= 0) {
+    if (c == 't') {
+      threads = atoi(optarg);
+    } else {
+      std::cerr << "Usage:   fmsi resave2 [-t threads] <index-prefix>" << std::endl;
+      return 1;
+    }
+  }
+  if (optind != argc - 1 || threads < 1) {
+    std::cerr << "Usage:   fmsi resave2 [-t threads] <index-prefix>" << std::endl;
+    return 1;
+  }
+  std::string fn = std::string(argv[optind]) + ".fmsi2";
+  fmsi2::index index;
+  fmsi2::load(index, fn, threads);
+  fmsi2::save(index, fn + ".resave");
+  std::filesystem::rename(fn + ".resave", fn);
+  return 0;
+}
+
 int main(int argc, char *argv[]) {
   int ret;
   if (argc < 2)
@@ -1119,6 +1145,8 @@ int main(int argc, char *argv[]) {
     ret = ms_query2(argc - 1, argv + 1, true);
   else if (op == "access2")
     ret = ms_access2(argc - 1, argv + 1);
+  else if (op == "resave2")
+    ret = ms_resave2(argc - 1, argv + 1);
   else if (op == "clean")
     ret = ms_clean(argc - 1, argv + 1);
   else if (op == "merge")

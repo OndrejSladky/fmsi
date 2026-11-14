@@ -293,8 +293,20 @@ void build(index &ix, mbwt &m, int k, mask_kind mask_type, uint32_t bwt_block_by
 }
 
 static const char MAGIC[8] = {'F', 'M', 'S', 'I', '2', 'I', 'D', 'X'};
-/// Version 3 adds the number of strands and the second sentinel; version 2 is read as one strand.
-static const uint32_t FORMAT_VERSION = 3;
+/// Version 4 stores the BWT as 2-bit characters without rank counts and the mask as an RRR vector, as FMSI does
+/// (2 bits and 0.2-0.9 bits per character on disk); both are expanded into the structures of the index when it
+/// is loaded, whose queries are thus unchanged. Version 3 stored those structures as they are in memory and adds
+/// to version 2 the number of strands and the second sentinel; version 2 is read as one strand.
+static const uint32_t FORMAT_VERSION = 4;
+
+/// The mask as a bitvector, whatever its encoding.
+inline sdsl::bit_vector mask_bits(const index &ix) {
+    sdsl::bit_vector bits(ix.size, 0);
+    for (size_t i = 0; i < ix.size; ++i) {
+        if (ix.mask_get(i)) bits[i] = 1;
+    }
+    return bits;
+}
 
 void save(const index &ix, const std::string &path) {
     std::ofstream out(path, std::ios::binary);
@@ -308,17 +320,17 @@ void save(const index &ix, const std::string &path) {
     write_pod(out, ix.dollar_position2);
     for (int c = 0; c < 4; ++c) write_pod(out, ix.counts[c]);
     write_pod(out, (uint32_t)ix.mask_type);
-    ix.bwt.write(out);
-    if (ix.mask_type == mask_kind::plain) {
-        ix.mask.write(out);
-    } else if (ix.mask_type == mask_kind::packed) {
-        ix.mask_packed.write(out);
-    } else {
+    ix.bwt.write_packed(out);
+    if (ix.mask_type == mask_kind::rrr) {
         ix.mask_rrr.serialize(out);
+    } else {
+        sdsl::rrr_vector<RRR_BLOCK_SIZE>(mask_bits(ix)).serialize(out);
     }
+    if (!out) throw std::invalid_argument("couldn't write file " + path);
 }
 
-void load(index &ix, const std::string &path) {
+/// Load an index; the rank counts of the BWT and the mask of version 4 are built on the given threads.
+void load(index &ix, const std::string &path, unsigned threads = 1) {
     std::ifstream in(path, std::ios::binary);
     if (!in) throw std::invalid_argument("couldn't open file " + path);
     char magic[sizeof(MAGIC)];
@@ -339,14 +351,42 @@ void load(index &ix, const std::string &path) {
     for (int c = 0; c < 4; ++c) read_pod(in, ix.counts[c]);
     read_pod(in, mask_type);
     ix.mask_type = (mask_kind)mask_type;
-    ix.bwt.read(in);
-    if (ix.mask_type == mask_kind::plain) {
-        ix.mask.read(in);
-    } else if (ix.mask_type == mask_kind::packed) {
-        ix.mask_packed.read(in);
+    if (version >= 4) {
+        ix.bwt.read_packed(in, threads);
+        sdsl::rrr_vector<RRR_BLOCK_SIZE> rrr;
+        rrr.load(in);
+        if (!in) throw std::invalid_argument("file " + path + " is truncated");
+        if (ix.mask_type == mask_kind::rrr) {
+            ix.mask_rrr = std::move(rrr);
+            ix.mask_rrr_rank = sdsl::rank_support_rrr<1, RRR_BLOCK_SIZE>(&ix.mask_rrr);
+        } else if (ix.mask_type == mask_kind::plain) {
+            // 64 bits at a time; each thread fills whole blocks of the mask.
+            ix.mask = bit_rank(ix.size);
+            parallel_chunks(ix.size, threads, parallel_chunk(bit_rank::BLOCK_BITS), [&](size_t begin, size_t end, unsigned) {
+                for (size_t i = begin; i < end; i += 64) {
+                    const unsigned count = (unsigned)std::min<size_t>(64, end - i);
+                    ix.mask.set_bits(i, rrr.get_int(i, count), count);
+                }
+            });
+            ix.mask.finalize(threads);
+        } else {
+            sdsl::bit_vector bits(ix.size, 0);
+            for (size_t i = 0; i < ix.size; i += 64) {
+                const unsigned count = (unsigned)std::min<size_t>(64, ix.size - i);
+                bits.set_int(i, rrr.get_int(i, count), count);
+            }
+            ix.mask_packed.build(ix.size, [&](size_t i) { return (bool)bits[i]; });
+        }
     } else {
-        ix.mask_rrr.load(in);
-        ix.mask_rrr_rank = sdsl::rank_support_rrr<1, RRR_BLOCK_SIZE>(&ix.mask_rrr);
+        ix.bwt.read(in);
+        if (ix.mask_type == mask_kind::plain) {
+            ix.mask.read(in);
+        } else if (ix.mask_type == mask_kind::packed) {
+            ix.mask_packed.read(in);
+        } else {
+            ix.mask_rrr.load(in);
+            ix.mask_rrr_rank = sdsl::rank_support_rrr<1, RRR_BLOCK_SIZE>(&ix.mask_rrr);
+        }
     }
     if (!in) throw std::invalid_argument("file " + path + " is truncated");
     prepare_access(ix);

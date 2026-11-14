@@ -494,6 +494,48 @@ class quad_rank {
         supers_.resize(super_count);
         in.read(reinterpret_cast<char *>(supers_.data()), super_count * sizeof(super_block));
     }
+
+    /// Write the symbols alone, 4 per byte in their order (symbol i at bits 2 (i % 4) of byte i / 4): the
+    /// bytes of the halves of the blocks without their counts, which read_packed computes again.
+    void write_packed(std::ostream &out) const {
+        write_pod(out, (uint64_t)size_);
+        const size_t total = (size_ + 3) / 4, per_block = BLOCK_SYMBOLS / 4, left = LEFT_SYMBOLS / 4;
+        std::vector<char> buffer;
+        buffer.reserve(1 << 20);
+        for (size_t b = 0, written = 0; written < total; ++b) {
+            const size_t bytes = std::min(per_block, total - written);
+            const char *block = reinterpret_cast<const char *>(blocks_[b].bytes);
+            buffer.insert(buffer.end(), block, block + std::min(bytes, left));
+            if (bytes > left) buffer.insert(buffer.end(), block + BYTES / 2, block + BYTES / 2 + (bytes - left));
+            written += bytes;
+            if (buffer.size() >= (1 << 20) - per_block || written == total) {
+                out.write(buffer.data(), buffer.size());
+                buffer.clear();
+            }
+        }
+    }
+
+    /// Read what write_packed wrote, and compute the rank counts on the given threads.
+    void read_packed(std::istream &in, unsigned threads = 1) {
+        uint64_t size;
+        read_pod(in, size);
+        *this = quad_rank(size);
+        const size_t total = (size_ + 3) / 4, per_block = BLOCK_SYMBOLS / 4, left = LEFT_SYMBOLS / 4;
+        const size_t chunk_blocks = 4096;
+        std::vector<char> buffer(chunk_blocks * per_block);
+        for (size_t b = 0, done = 0; done < total; b += chunk_blocks) {
+            const size_t bytes = std::min(chunk_blocks * per_block, total - done);
+            in.read(buffer.data(), bytes);
+            for (size_t offset = 0; offset < bytes; offset += per_block) {
+                const size_t n = std::min(per_block, bytes - offset);
+                uint8_t *block = blocks_[b + offset / per_block].bytes;
+                memcpy(block, buffer.data() + offset, std::min(n, left));
+                if (n > left) memcpy(block + BYTES / 2, buffer.data() + offset + left, n - left);
+            }
+            done += bytes;
+        }
+        finalize(threads);
+    }
 };
 
 /// A sequence of 2-bit symbols with rank, in blocks of 64, 128 or 256 bytes, chosen when it is built.
@@ -608,6 +650,18 @@ class quad_sequence {
         if (!valid_block_bytes(block_bytes_)) throw std::invalid_argument("unsupported size of the blocks of the BWT");
         visit([&](auto &ranks) { ranks.read(in); });
     }
+
+    /// The symbols alone (2 bits each), whose rank counts are computed when they are read.
+    void write_packed(std::ostream &out) const {
+        write_pod(out, block_bytes_);
+        visit([&](const auto &ranks) { ranks.write_packed(out); });
+    }
+
+    void read_packed(std::istream &in, unsigned threads = 1) {
+        read_pod(in, block_bytes_);
+        if (!valid_block_bytes(block_bytes_)) throw std::invalid_argument("unsupported size of the blocks of the BWT");
+        visit([&](auto &ranks) { ranks.read_packed(in, threads); });
+    }
 };
 
 /// One cache line of bits: a count of 16 bits and 496 bits.
@@ -645,6 +699,25 @@ class bit_rank {
     void set(size_t i) {
         size_t p = i % BLOCK_BITS + HEADER_BITS;
         blocks_[i / BLOCK_BITS].words[p / 64] |= 1ULL << (p % 64);
+    }
+
+    /// Set the bits i, ..., i + count - 1 to the low count bits of [bits] (count <= 64); valid only before
+    /// finalize(), on bits that are not set yet.
+    void set_bits(size_t i, uint64_t bits, unsigned count) {
+        bits &= count == 64 ? ~0ULL : (1ULL << count) - 1;
+        while (count > 0 && bits != 0) {
+            // The part within the block of bit i.
+            const size_t r = i % BLOCK_BITS;
+            const unsigned part = (unsigned)std::min<size_t>(count, BLOCK_BITS - r);
+            const uint64_t chunk = part == 64 ? bits : bits & ((1ULL << part) - 1);
+            const size_t p = r + HEADER_BITS;
+            uint64_t *words = blocks_[i / BLOCK_BITS].words;
+            words[p / 64] |= chunk << (p % 64);
+            if (p % 64 != 0 && p % 64 + part > 64) words[p / 64 + 1] |= chunk >> (64 - p % 64);
+            bits = part == 64 ? 0 : bits >> part;
+            i += part;
+            count -= part;
+        }
     }
 
     /// Compute the rank counts; to be called once after all bits are set.
