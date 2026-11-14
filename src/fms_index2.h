@@ -417,26 +417,31 @@ inline unsigned default_prefix_length(const index &ix) {
 /// characters in the order of the backward search, the first one being the most significant.
 void build_prefix_table(index &ix, unsigned length) {
     length = std::min(length, ix.k);
-    std::vector<uint64_t> current = {0, ix.size};
-    for (unsigned depth = 0; depth < length; ++depth) {
-        std::vector<uint64_t> next(current.size() * 4);
-        for (size_t key = 0; key < current.size() / 2; ++key) {
-            for (byte c = 0; c < 4; ++c) {
-                size_t i = current[2 * key], j = current[2 * key + 1];
-                if (i != j) update_range(ix, i, j, c);
-                next[2 * (4 * key + c)] = i;
-                next[2 * (4 * key + c) + 1] = j;
-            }
-        }
-        current = std::move(next);
-    }
     ix.prefix_length = length;
     ix.prefix_table32.clear();
     ix.prefix_table64.clear();
+    // Level by level in the integers of the table, so that the peak is the last two levels (1.25 times the table).
+    auto build = [&](auto &table) {
+        using value_t = typename std::decay_t<decltype(table)>::value_type;
+        std::vector<value_t> current = {0, (value_t)ix.size};
+        for (unsigned depth = 0; depth < length; ++depth) {
+            std::vector<value_t> next(current.size() * 4);
+            for (size_t key = 0; key < current.size() / 2; ++key) {
+                for (byte c = 0; c < 4; ++c) {
+                    size_t i = current[2 * key], j = current[2 * key + 1];
+                    if (i != j) update_range(ix, i, j, c);
+                    next[2 * (4 * key + c)] = (value_t)i;
+                    next[2 * (4 * key + c) + 1] = (value_t)j;
+                }
+            }
+            current = std::move(next);
+        }
+        table = std::move(current);
+    };
     if (ix.size < ((uint64_t)1 << 32)) {
-        ix.prefix_table32.assign(current.begin(), current.end());
+        build(ix.prefix_table32);
     } else {
-        ix.prefix_table64 = std::move(current);
+        build(ix.prefix_table64);
     }
 }
 
