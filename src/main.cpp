@@ -3,6 +3,7 @@
 
 #include "fms_index.h"
 #include "fms_index2.h"
+#include "doubled.h"
 #include "query_pipeline.h"
 #include "parser.h"
 #include "version.h"
@@ -13,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <getopt.h>
 #include <math.h>
 #include <thread>
 
@@ -391,13 +393,18 @@ int ms_query(int argc, char *argv[], bool output_orders) {
 static int usage_index2() {
   std::cerr << std::endl;
   std::cerr << "Usage:   fmsi index2 [options] <masked-superstring-input>" << std::endl << std::endl;
+  std::cerr << "Presets:" << std::endl;
+  std::cerr << "    --small - the masked superstring alone [default]" << std::endl;
+  std::cerr << "    --fast  - the masked superstring and its reverse complement (twice the space): a k-mer is" << std::endl;
+  std::cerr << "              searched as it is only, never as its reverse complement" << std::endl;
+  std::cerr << "    Both use the plain mask and BWT blocks of 64 bytes, which -m and -c change." << std::endl << std::endl;
   std::cerr << "Options:" << std::endl;
   std::cerr << "    -k INT  - size of k-mers [default: number of mask trailing zeros - 1]" << std::endl;
   std::cerr << "    -m STR  - encoding of the mask: plain (the fastest), packed (smaller), or rrr (the smallest, slow) [default: plain]" << std::endl;
   std::cerr << "    -c INT  - bytes per block of the BWT: 64 (the fastest), 128 or 256 (the smallest) [default: 64]" << std::endl;
   std::cerr << "    -l      - also construct the kLCP array (1 bit per character), which speeds up streamed queries" << std::endl;
   std::cerr << "    -o STR  - prefix of the index file [default: path to the masked superstring]" << std::endl;
-  std::cerr << "    -Q      - construct the suffix array by QSufSort instead of libsais." << std::endl;
+  std::cerr << "    -Q      - construct the suffix array by QSufSort instead of libsais (--small only)" << std::endl;
   std::cerr << "    -t INT  - number of threads [default: 1]; the suffix array is constructed on "
             << (SUFFIX_ARRAY_THREADED ? "all of them (compiled with OpenMP)" : "one thread (compiled without OpenMP)")
             << std::endl << std::endl;
@@ -440,8 +447,22 @@ int ms_index2(int argc, char *argv[]) {
   int block_bytes = 64;
   bool use_klcp = false;
   int threads = 1;
-  while ((c = getopt(argc, argv, "hk:m:c:lo:Qt:")) >= 0) {
+  // Presets: --small (one strand) or --fast (both strands).
+  bool fast = false;
+  enum { OPTION_SMALL = 256, OPTION_FAST };
+  static const struct option long_options[] = {
+      {"small", no_argument, nullptr, OPTION_SMALL},
+      {"fast", no_argument, nullptr, OPTION_FAST},
+      {nullptr, 0, nullptr, 0},
+  };
+  while ((c = getopt_long(argc, argv, "hk:m:c:lo:Qt:", long_options, nullptr)) >= 0) {
     switch (c) {
+    case OPTION_SMALL:
+      fast = false;
+      break;
+    case OPTION_FAST:
+      fast = true;
+      break;
     case 'h':
       usage = true;
       break;
@@ -495,6 +516,10 @@ int ms_index2(int argc, char *argv[]) {
     return usage_index2();
   }
   if (prefix.empty()) prefix = fn;
+  if (fast && use_qsufsort) {
+    std::cerr << "ERROR: QSufSort (-Q) constructs the --small index only." << std::endl;
+    return usage_index2();
+  }
 
   build_phases = phase_timer();
   auto ms = read_masked_superstring(fn);
@@ -509,25 +534,31 @@ int ms_index2(int argc, char *argv[]) {
     std::cerr << "Inferred k from the masked case convention: " << k << std::endl;
   }
 
-  mbwt m = k <= 32 ? compute_mbwt<uint64_t>(ms, k, use_klcp, use_qsufsort, threads)
-                   : compute_mbwt<__uint128_t>(ms, k, use_klcp, use_qsufsort, threads);
-  std::cerr << "Constructed the masked Burrows-Wheeler transform" << std::endl;
   size_t length = ms.size();
-  ms = std::string();
+  mbwt m;
+  if (fast) {
+    m = doubled::compute_mbwt(std::move(ms), k, use_klcp, threads);
+  } else {
+    m = k <= 32 ? compute_mbwt<uint64_t>(ms, k, use_klcp, use_qsufsort, threads)
+                : compute_mbwt<__uint128_t>(ms, k, use_klcp, use_qsufsort, threads);
+  }
+  std::cerr << "Constructed the masked Burrows-Wheeler transform" << (fast ? " of both strands" : "") << std::endl;
+  std::string().swap(ms);
   fmsi2::index index;
   fmsi2::build(index, m, k, mask_type, block_bytes, threads);
   fmsi2::save(index, prefix + ".fmsi2");
   std::cerr << "Written index: BWT " << index.bwt.bytes() << " bytes (" << 8.0 * index.bwt.bytes() / length
-            << " bits per character), mask " << index.mask_bytes() << " bytes ("
-            << 8.0 * index.mask_bytes() / length << " bits per character)" << std::endl;
+            << " bits per character of the superstring), mask " << index.mask_bytes() << " bytes ("
+            << 8.0 * index.mask_bytes() / length << " bits per character of the superstring)" << std::endl;
   if (use_klcp) {
     fmsi2::save_klcp(index, prefix + ".fmsi2.klcp");
-    std::cerr << "Written kLCP array: 1 bit per character" << std::endl;
+    std::cerr << "Written kLCP array: " << index.strands << " bit(s) per character of the superstring" << std::endl;
   }
   build_phases.lap("write");
 
   double total = 0;
-  std::cerr << "[fmsi2-build]\tthreads=" << threads << "\topenmp=" << SUFFIX_ARRAY_THREADED;
+  std::cerr << "[fmsi2-build]\tpreset=" << (fast ? "fast" : "small") << "\tstrands=" << index.strands
+            << "\tthreads=" << threads << "\topenmp=" << SUFFIX_ARRAY_THREADED;
   for (const auto &phase : build_phases.phases) {
     std::cerr << "\t" << phase.first << "_s=" << phase.second;
     total += phase.second;
@@ -641,7 +672,7 @@ int ms_query2(int argc, char *argv[], bool output_orders) {
             << "\tkmers=" << lookups.kmers << "\tfound=" << lookups.found
             << "\tsteps_per_kmer=" << (lookups.kmers ? (double)lookups.steps / lookups.kmers : 0)
             << "\tsearches=" << lookups.searches << "\trechecks=" << lookups.rechecks
-            << "\tklcp=" << index.has_klcp() << "\tthreads=" << threads
+            << "\tklcp=" << index.has_klcp() << "\tstrands=" << index.strands << "\tthreads=" << threads
             << "\tload_s=" << load_seconds << "\ttable_s=" << table_seconds
             << "\tread_s=" << stats.read << "\tparse_s=" << stats.parse / threads
             << "\tscan_s=" << stats.scan / threads

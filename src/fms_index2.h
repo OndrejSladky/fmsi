@@ -211,6 +211,8 @@ void build(index &ix, mbwt &m, int k, mask_kind mask_type, uint32_t bwt_block_by
     ix.size = m.bwt.size();
     ix.dollar_position = m.dollar_position;
     ix.dollar_position2 = m.dollar_position2 == mbwt::NO_ROW ? NO_ROW : m.dollar_position2;
+    // A second sentinel separates the superstring from its reverse complement (doubled.h).
+    ix.strands = ix.dollar_position2 == NO_ROW ? 1 : 2;
     ix.klcp = std::move(m.klcp);
 
     ix.bwt = quad_sequence(m.bwt.size(), bwt_block_bytes);
@@ -372,7 +374,9 @@ struct lookup_stats {
 
 /// Look up the k-mers starting at the given offsets of the sequence, [batch_size] of them at a time.
 /// For each k-mer, out[offset] is set to its presence (0/1), or to its hash (-1 if absent) if [hashes].
-/// A k-mer is represented if the k-mer or its reverse complement has an occurrence set in the mask.
+/// A k-mer is represented if the k-mer or its reverse complement has an occurrence set in the mask; if
+/// the index holds both strands, the k-mer itself is searched only, and the hashes are those of the k-mers
+/// as they are (a k-mer and its reverse complement have different hashes).
 template <bool hashes, typename out_t>
 void lookup_batch(const index &ix, const char *sequence, const uint32_t *offsets, size_t count, out_t *out,
                   unsigned batch_size, lookup_stats &stats) {
@@ -399,6 +403,8 @@ void lookup_batch(const index &ix, const char *sequence, const uint32_t *offsets
     // Saturating counter predicting the strand of the next k-mer from the previous hits.
     int score = 0;
     uint64_t found = 0, steps = 0, searches = 0;
+    // With both strands indexed, a k-mer is searched as it is only.
+    const bool one_strand = ix.strands == 2;
 
     auto begin_strand = [&](slot &s) {
         ++searches;
@@ -427,12 +433,12 @@ void lookup_batch(const index &ix, const char *sequence, const uint32_t *offsets
         }
         s.offset = offsets[next++];
         s.kmer = sequence + s.offset;
-        s.reverse = score < 0;
+        s.reverse = !one_strand && score < 0;
         s.second = 0;
         begin_strand(s);
     };
     auto strand_failed = [&](slot &s) {
-        if (s.second) {
+        if (s.second || one_strand) {
             out[s.offset] = hashes ? -1 : 0;
             load(s);
         } else {
@@ -513,7 +519,8 @@ struct segment {
 /// Look up all k-mers of the segments by streaming, [batch_size] segments at a time; the results
 /// are as in lookup_batch (out must be initialized to 0, or to -1 if [hashes]).
 ///
-/// A segment is searched on one strand and the k-mers not found there on the other one. On a strand,
+/// A segment is searched on one strand and the k-mers not found there on the other one (if the index holds
+/// both strands, on the strand of the query only). On a strand,
 /// the k-mers (windows) are resolved from the right to the left: the match of a window is extended by one
 /// character to the match of the next one, so the match can get longer than k. A longer match has a
 /// subset of the occurrences of the k-mer, hence a set mask bit proves the k-mer represented, while an
@@ -567,6 +574,8 @@ void lookup_streaming(const index &ix, const char *sequence, const segment *segm
     size_t next = 0, active = slots.size();
     int score = 0;
     uint64_t found = 0, steps = 0, kmers = 0, searches = 0, rechecks = 0;
+    // With both strands indexed, the windows are searched as they are only.
+    const bool one_strand = ix.strands == 2;
 
     // Character of the strand at position v, and the result of its window y.
     auto symbol = [&](const slot &s, int v) -> byte {
@@ -609,7 +618,7 @@ void lookup_streaming(const index &ix, const char *sequence, const segment *segm
         }
     };
     strand_done = [&](slot &s) {
-        if (!s.second) {
+        if (!s.second && !one_strand) {
             s.second = 1;
             s.reverse ^= 1;
             s.top_only_above = INT32_MAX;
@@ -634,7 +643,7 @@ void lookup_streaming(const index &ix, const char *sequence, const segment *segm
         s.length = g.length;
         s.windows = g.length - k + 1;
         kmers += s.windows;
-        s.reverse = score < 0;
+        s.reverse = !one_strand && score < 0;
         s.second = 0;
         s.hits[0] = s.hits[1] = 0;
         s.top_only_above = INT32_MAX;
