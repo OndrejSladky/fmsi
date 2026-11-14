@@ -378,8 +378,16 @@ struct lookup_stats {
 /// the index holds both strands, the k-mer itself is searched only, and the hashes are those of the k-mers
 /// as they are (a k-mer and its reverse complement have different hashes).
 template <bool hashes, typename out_t>
+void lookup_one_strand(const index &ix, const char *sequence, const uint32_t *offsets, size_t count, out_t *out,
+                       unsigned batch_size, lookup_stats &stats);
+
+template <bool hashes, typename out_t>
 void lookup_batch(const index &ix, const char *sequence, const uint32_t *offsets, size_t count, out_t *out,
                   unsigned batch_size, lookup_stats &stats) {
+    if (ix.strands == 2 && ix.k <= 32 && ix.prefix_length <= ix.k) {
+        lookup_one_strand<hashes, out_t>(ix, sequence, offsets, count, out, batch_size, stats);
+        return;
+    }
     const unsigned k = ix.k;
     const unsigned p = ix.prefix_length;
     const uint64_t *table = ix.prefix_table.data();
@@ -511,6 +519,142 @@ void lookup_batch(const index &ix, const char *sequence, const uint32_t *offsets
     stats.searches += searches;
 }
 
+/// Lookups on an index of both strands (index2 --fast) for k <= 32, with the rank structure of the BWT
+/// given (one instantiation per block size): a k-mer is searched as it is only, its symbols packed into a
+/// word in the order of the search, so that a step of a slot is a shift, the ranks, and the prefetch of
+/// the next block(s). Results as in lookup_batch.
+template <bool hashes, typename out_t, typename ranks_t>
+void lookup_one_strand(const index &ix, const ranks_t &bwt, const char *sequence, const uint32_t *offsets,
+                       size_t count, out_t *out, unsigned batch_size, lookup_stats &stats) {
+    const unsigned k = ix.k;
+    const unsigned p = ix.prefix_length;
+    const uint64_t *table = ix.prefix_table.data();
+    const uint64_t counts[4] = {ix.counts[0], ix.counts[1], ix.counts[2], ix.counts[3]};
+    const uint64_t dollar = ix.dollar_position, dollar2 = ix.dollar_position2;
+    const bool mask_has_directory = ix.mask_has_directory();
+
+    enum : uint8_t { SEARCH, START, LOCATE_MASK, MASK, IDLE };
+    struct slot {
+        uint64_t i, j;
+        /// The symbols still to be searched, the next one in the lowest two bits.
+        uint64_t rest;
+        /// The key of the table (START), or the value returned by mask_prefetch(i) (MASK).
+        uint64_t key_or_hint;
+        uint32_t offset;
+        /// Number of symbols still to be searched.
+        uint8_t left;
+        uint8_t state;
+    };
+    std::vector<slot> slots(std::max(1u, batch_size));
+    size_t next = 0, active = slots.size();
+    uint64_t found = 0, steps = 0;
+
+    auto load = [&](slot &s) {
+        if (next == count) {
+            s.state = IDLE;
+            --active;
+            return;
+        }
+        s.offset = offsets[next++];
+        const char *kmer = sequence + s.offset;
+        // The search goes from the last symbol of the k-mer to the first one.
+        uint64_t key = 0, rest = 0;
+        for (unsigned t = 0; t < p; ++t) key = (key << 2) | nucleotideToInt[(uint8_t)kmer[k - 1 - t]];
+        for (unsigned t = p; t < k; ++t) rest |= (uint64_t)nucleotideToInt[(uint8_t)kmer[k - 1 - t]] << (2 * (t - p));
+        s.rest = rest;
+        s.left = k - p;
+        if (p == 0) {
+            s.i = 0;
+            s.j = ix.size;
+            s.state = SEARCH;
+        } else {
+            s.key_or_hint = key;
+            s.state = START;
+            __builtin_prefetch(table + 2 * key);
+        }
+    };
+    auto to_mask = [&](slot &s) {
+        if (mask_has_directory) {
+            s.state = LOCATE_MASK;
+            ix.mask_prefetch_directory(s.i);
+        } else {
+            s.state = MASK;
+            s.key_or_hint = ix.mask_prefetch(s.i);
+        }
+    };
+
+    for (slot &s : slots) load(s);
+    while (active > 0) {
+        for (slot &s : slots) {
+            if (__builtin_expect(s.state == SEARCH, 1)) {
+                const uint8_t c = s.rest & 3;
+                s.rest >>= 2;
+                size_t rank_i, rank_j;
+                bwt.rank_pair(s.i, s.j, c, rank_i, rank_j);
+                // The sentinels are stored as A.
+                const size_t dollars_i = c == 0 ? (s.i > dollar) + (s.i > dollar2) : 0;
+                const size_t dollars_j = c == 0 ? (s.j > dollar) + (s.j > dollar2) : 0;
+                s.i = counts[c] + rank_i - dollars_i;
+                s.j = counts[c] + rank_j - dollars_j;
+                ++steps;
+                if (s.i == s.j) {
+                    out[s.offset] = hashes ? -1 : 0;
+                    load(s);
+                } else if (--s.left == 0) {
+                    to_mask(s);
+                } else {
+                    bwt.prefetch(s.i);
+                    if (s.j - s.i > 1) bwt.prefetch(s.j);
+                }
+                continue;
+            }
+            switch (s.state) {
+            case START:
+                s.i = table[2 * s.key_or_hint];
+                s.j = table[2 * s.key_or_hint + 1];
+                if (s.i == s.j) {
+                    out[s.offset] = hashes ? -1 : 0;
+                    load(s);
+                } else if (s.left == 0) {
+                    to_mask(s);
+                } else {
+                    s.state = SEARCH;
+                    bwt.prefetch(s.i);
+                    bwt.prefetch(s.j);
+                }
+                break;
+            case LOCATE_MASK:
+                s.state = MASK;
+                s.key_or_hint = ix.mask_prefetch(s.i);
+                break;
+            case MASK:
+                if (ix.mask_any(s.i, s.j, s.key_or_hint)) {
+                    out[s.offset] = hashes ? (out_t)ix.mask_rank(s.i) : (out_t)1;
+                    ++found;
+                } else {
+                    out[s.offset] = hashes ? -1 : 0;
+                }
+                load(s);
+                break;
+            default:
+                break;
+            }
+        }
+    }
+    stats.kmers += count;
+    stats.found += found;
+    stats.steps += steps;
+    stats.searches += count;
+}
+
+template <bool hashes, typename out_t>
+void lookup_one_strand(const index &ix, const char *sequence, const uint32_t *offsets, size_t count, out_t *out,
+                       unsigned batch_size, lookup_stats &stats) {
+    ix.bwt.with_ranks([&](const auto &ranks) {
+        lookup_one_strand<hashes, out_t>(ix, ranks, sequence, offsets, count, out, batch_size, stats);
+    });
+}
+
 /// A stretch of a query sequence without invalid characters, at least k characters long.
 struct segment {
     uint32_t offset, length;
@@ -534,9 +678,9 @@ struct segment {
 /// superstring, so that all windows containing it are absent on this strand. To find such substrings
 /// cheaply, the unresolved windows containing the position where the search stopped are searched
 /// starting from the lowest one, whose search stops the earliest.
-template <bool hashes, typename out_t>
-void lookup_streaming(const index &ix, const char *sequence, const segment *segments, size_t count, out_t *out,
-                      unsigned batch_size, lookup_stats &stats) {
+template <bool hashes, typename out_t, bool one_strand, typename ranks_t>
+void lookup_streaming(const index &ix, const ranks_t &bwt, const char *sequence, const segment *segments, size_t count,
+                      out_t *out, unsigned batch_size, lookup_stats &stats) {
     const int k = ix.k;
     const int p = ix.prefix_length;
     const uint64_t *table = ix.prefix_table.data();
@@ -570,19 +714,25 @@ void lookup_streaming(const index &ix, const char *sequence, const segment *segm
         /// and whether the matched string has exactly k characters.
         uint8_t reverse, second, exact;
     };
+    // Go from the interval of P to that of c P, with the rank structure given.
+    auto extend = [&](size_t &i, size_t &j, byte c) {
+        size_t rank_i, rank_j;
+        bwt.rank_pair(i, j, c, rank_i, rank_j);
+        size_t dollars_i = c == 0 ? dollars_before(ix, i) : 0, dollars_j = c == 0 ? dollars_before(ix, j) : 0;
+        i = ix.counts[c] + rank_i - dollars_i;
+        j = ix.counts[c] + rank_j - dollars_j;
+    };
     std::vector<slot> slots(std::max(1u, batch_size));
     size_t next = 0, active = slots.size();
     int score = 0;
     uint64_t found = 0, steps = 0, kmers = 0, searches = 0, rechecks = 0;
-    // With both strands indexed, the windows are searched as they are only.
-    const bool one_strand = ix.strands == 2;
 
     // Character of the strand at position v, and the result of its window y.
     auto symbol = [&](const slot &s, int v) -> byte {
-        return s.reverse ? 3 - nucleotideToInt[(uint8_t)s.sequence[s.length - 1 - v]]
+        return !one_strand && s.reverse ? 3 - nucleotideToInt[(uint8_t)s.sequence[s.length - 1 - v]]
                          : nucleotideToInt[(uint8_t)s.sequence[v]];
     };
-    auto result = [&](const slot &s, int y) -> out_t & { return s.out[s.reverse ? s.windows - 1 - y : y]; };
+    auto result = [&](const slot &s, int y) -> out_t & { return s.out[!one_strand && s.reverse ? s.windows - 1 - y : y]; };
     auto unresolved = [&](const slot &s, int y) {
         out_t value = result(s, y);
         return value == UNRESOLVED || (s.second && value == ABSENT[0]);
@@ -690,8 +840,8 @@ void lookup_streaming(const index &ix, const char *sequence, const segment *segm
     auto to_check = [&](slot &s) {
         s.state = CHECK;
         s.hint = ix.mask_prefetch(s.i);
-        ix.bwt.prefetch(s.i);
-        ix.bwt.prefetch(s.j);
+        bwt.prefetch(s.i);
+        bwt.prefetch(s.j);
         if (klcp) ix.klcp_prefetch(s.i, s.j);
     };
     auto after_search_step = [&](slot &s) {
@@ -702,8 +852,8 @@ void lookup_streaming(const index &ix, const char *sequence, const segment *segm
             to_check(s);
         } else {
             s.state = SEARCH;
-            ix.bwt.prefetch(s.i);
-            ix.bwt.prefetch(s.j);
+            bwt.prefetch(s.i);
+            bwt.prefetch(s.j);
         }
     };
     // The interval is the one of a string starting with window x: resolve the window and go to the next one.
@@ -737,7 +887,7 @@ void lookup_streaming(const index &ix, const char *sequence, const segment *segm
         --s.x;
         // With the kLCP array, drop the last character of the k-mer first, so that the match stays a k-mer.
         if (klcp) ix.klcp_widen(s.i, s.j);
-        update_range(ix, s.i, s.j, symbol(s, s.x));
+        extend(s.i, s.j, symbol(s, s.x));
         ++steps;
         if (s.i != s.j) {
             s.exact = klcp;
@@ -762,7 +912,7 @@ void lookup_streaming(const index &ix, const char *sequence, const segment *segm
                 after_search_step(s);
                 break;
             case SEARCH:
-                update_range(ix, s.i, s.j, symbol(s, s.x + k - 1 - s.t));
+                extend(s.i, s.j, symbol(s, s.x + k - 1 - s.t));
                 ++s.t;
                 ++steps;
                 after_search_step(s);
@@ -781,6 +931,20 @@ void lookup_streaming(const index &ix, const char *sequence, const segment *segm
     stats.steps += steps;
     stats.searches += searches;
     stats.rechecks += rechecks;
+}
+
+/// Streamed lookups (see the instantiations below), for the rank structure of the block size of the index and
+/// with the strand logic compiled out if the index holds both strands.
+template <bool hashes, typename out_t>
+void lookup_streaming(const index &ix, const char *sequence, const segment *segments, size_t count, out_t *out,
+                      unsigned batch_size, lookup_stats &stats) {
+    ix.bwt.with_ranks([&](const auto &ranks) {
+        if (ix.strands == 2) {
+            lookup_streaming<hashes, out_t, true>(ix, ranks, sequence, segments, count, out, batch_size, stats);
+        } else {
+            lookup_streaming<hashes, out_t, false>(ix, ranks, sequence, segments, count, out, batch_size, stats);
+        }
+    });
 }
 
 /// The first symbol of the suffix of a row (not the row 0 of the empty suffix).

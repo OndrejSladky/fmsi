@@ -494,6 +494,12 @@ class quad_sequence {
   public:
     quad_sequence() = default;
 
+    /// Call f with the rank structure of the chosen block size, for loops instantiated for each of them.
+    template <typename function>
+    inline auto with_ranks(function f) const {
+        return visit(f);
+    }
+
     quad_sequence(size_t size, uint32_t block_bytes) : block_bytes_(block_bytes) {
         visit([&](auto &ranks) { ranks = std::decay_t<decltype(ranks)>(size); });
     }
