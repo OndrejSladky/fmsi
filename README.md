@@ -143,7 +143,10 @@ The commands `index2`, `query2` and `lookup2` are a prototype of a faster index 
 They do not replace the stable commands yet and use their own index file (`<prefix>.fmsi2`).
 
 ```
-./fmsi index2 ms.fa                           # smaller and somewhat slower: -m packed, -c 128
+./fmsi index2 ms.fa                           # preset --small (the default): the superstring alone
+./fmsi index2 --fast ms.fa                    # preset --fast: also its reverse complement, twice the space
+./fmsi index2 --fast --lean ms.fa             # the same index with half the memory of the construction
+./fmsi index2 -m packed -c 128 ms.fa          # smaller and somewhat slower
 ./fmsi query2 -q queries.fa ms.fa             # membership of each k-mer, as `fmsi query`
 ./fmsi lookup2 -q queries.fa ms.fa            # hashes of the k-mers, as `fmsi lookup`
 ./fmsi access2 -q hashes.txt ms.fa            # the k-mers of hashes, the inverse of lookup2
@@ -151,6 +154,13 @@ They do not replace the stable commands yet and use their own index file (`<pref
 ./fmsi index2 -l ms.fa                        # with the kLCP array, for faster streamed queries
 ./fmsi index2 -t 8 ms.fa                      # construction on 8 threads
 ```
+
+Presets of `index2`:
+
+- `--small` (the default) indexes the masked superstring X alone, with the plain mask and BWT blocks of 64 bytes. A k-mer is searched as it is and, if it is not found, as its reverse complement; a saturating counter predicts which strand to try first.
+- `--fast` indexes X, a separator and the reverse complement of X, so that every k-mer occurs in both orientations and is searched as it is only, on one strand, by lookups and by streaming. It takes twice the space (and `-l` twice the kLCP array). The separator sorts before the characters and after the end of the text, so the suffix array is the generalized one of the two strings and no k-mer spans them; the mask of the reverse complement is that of X reversed (its k-mer at j is the reverse complement of the one of X at n - j - k). Hashes are those of the k-mers as they are: a k-mer and its reverse complement have different hashes, in [0, 2N) for N k-mers and a mask with the minimum number of ones, and `access2` returns the k-mer as it is. Lookups of k <= 32 run in a loop of their own, and the default `-p` of `query2` is larger (11 or 12 for large indexes, at most half a bit per row).
+- `--lean` (with `--fast`) constructs the suffix arrays of X and of its reverse complement one after the other, with 32-bit integers up to 2^31 characters of X, keeps them in temporary files, and merges them: the suffixes of the reverse complement are inserted among those of X by backward search on the BWT of X, in chains that run in parallel from anchors found by binary search (each chain must end at the next anchor). The index is the same as without `--lean`, with about half the memory and no 64-bit suffix array beyond 2^30 characters of X.
+- `-m`, `-c` and `-l` change what the presets set.
 
 The differences from the stable index:
 
