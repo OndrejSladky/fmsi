@@ -62,9 +62,32 @@ struct index {
     /// of the rows i and i + 1 share their first k - 1 characters.
     sdsl::bit_vector klcp;
 
-    /// SA intervals of all patterns of length prefix_length; computed at load time, not stored.
+    /// SA intervals of all patterns of length prefix_length, two integers per pattern (32-bit if the BWT has
+    /// less than 2^32 rows); computed at load time, not stored.
     uint32_t prefix_length = 0;
-    std::vector<uint64_t> prefix_table;
+    std::vector<uint32_t> prefix_table32;
+    std::vector<uint64_t> prefix_table64;
+
+    /// The interval of the pattern number key of the table.
+    inline void prefix_interval(uint64_t key, size_t &i, size_t &j) const {
+        if (!prefix_table32.empty()) {
+            i = prefix_table32[2 * key];
+            j = prefix_table32[2 * key + 1];
+        } else {
+            i = prefix_table64[2 * key];
+            j = prefix_table64[2 * key + 1];
+        }
+    }
+
+    inline void prefix_prefetch(uint64_t key) const {
+        if (!prefix_table32.empty()) {
+            __builtin_prefetch(prefix_table32.data() + 2 * key);
+        } else {
+            __builtin_prefetch(prefix_table64.data() + 2 * key);
+        }
+    }
+
+    size_t prefix_table_bytes() const { return prefix_table32.size() * 4 + prefix_table64.size() * 8; }
 
     /// For access (hash -> k-mer), computed when the index is built or loaded, not stored: the number
     /// of symbols A of the BWT before the dollar, which is stored as A, and the number of set bits of
@@ -332,6 +355,16 @@ void load_klcp(index &ix, const std::string &path) {
     }
 }
 
+/// The default length of the tabulated patterns: 10 for an index of one strand; for one of both strands
+/// (index2 --fast) the largest length from 10 to 12 whose table (8 * 4^length bytes) takes at most half a
+/// bit per row of the BWT.
+inline unsigned default_prefix_length(const index &ix) {
+    if (ix.strands == 1) return 10;
+    unsigned length = 10;
+    while (length < 12 && 8.0 * ((uint64_t)1 << (2 * (length + 1))) <= ix.size / 16.0) ++length;
+    return length;
+}
+
 /// Tabulate the SA intervals of all patterns of the given length. An entry is indexed by the
 /// characters in the order of the backward search, the first one being the most significant.
 void build_prefix_table(index &ix, unsigned length) {
@@ -350,7 +383,13 @@ void build_prefix_table(index &ix, unsigned length) {
         current = std::move(next);
     }
     ix.prefix_length = length;
-    ix.prefix_table = std::move(current);
+    ix.prefix_table32.clear();
+    ix.prefix_table64.clear();
+    if (ix.size < ((uint64_t)1 << 32)) {
+        ix.prefix_table32.assign(current.begin(), current.end());
+    } else {
+        ix.prefix_table64 = std::move(current);
+    }
 }
 
 struct lookup_stats {
@@ -390,7 +429,6 @@ void lookup_batch(const index &ix, const char *sequence, const uint32_t *offsets
     }
     const unsigned k = ix.k;
     const unsigned p = ix.prefix_length;
-    const uint64_t *table = ix.prefix_table.data();
 
     enum : uint8_t { IDLE, START, SEARCH, LOCATE_MASK, MASK };
     struct slot {
@@ -431,7 +469,7 @@ void lookup_batch(const index &ix, const char *sequence, const uint32_t *offsets
         }
         s.key = key;
         s.state = START;
-        __builtin_prefetch(table + 2 * key);
+        ix.prefix_prefetch(key);
     };
     auto load = [&](slot &s) {
         if (next == count) {
@@ -478,8 +516,7 @@ void lookup_batch(const index &ix, const char *sequence, const uint32_t *offsets
         for (slot &s : slots) {
             switch (s.state) {
             case START:
-                s.i = table[2 * s.key];
-                s.j = table[2 * s.key + 1];
+                ix.prefix_interval(s.key, s.i, s.j);
                 s.t = p;
                 advance(s);
                 break;
@@ -528,14 +565,13 @@ void lookup_one_strand(const index &ix, const ranks_t &bwt, const char *sequence
                        size_t count, out_t *out, unsigned batch_size, lookup_stats &stats) {
     const unsigned k = ix.k;
     const unsigned p = ix.prefix_length;
-    const uint64_t *table = ix.prefix_table.data();
     const uint64_t counts[4] = {ix.counts[0], ix.counts[1], ix.counts[2], ix.counts[3]};
     const uint64_t dollar = ix.dollar_position, dollar2 = ix.dollar_position2;
     const bool mask_has_directory = ix.mask_has_directory();
 
     enum : uint8_t { SEARCH, START, LOCATE_MASK, MASK, IDLE };
     struct slot {
-        uint64_t i, j;
+        size_t i, j;
         /// The symbols still to be searched, the next one in the lowest two bits.
         uint64_t rest;
         /// The key of the table (START), or the value returned by mask_prefetch(i) (MASK).
@@ -570,7 +606,7 @@ void lookup_one_strand(const index &ix, const ranks_t &bwt, const char *sequence
         } else {
             s.key_or_hint = key;
             s.state = START;
-            __builtin_prefetch(table + 2 * key);
+            ix.prefix_prefetch(key);
         }
     };
     auto to_mask = [&](slot &s) {
@@ -610,8 +646,7 @@ void lookup_one_strand(const index &ix, const ranks_t &bwt, const char *sequence
             }
             switch (s.state) {
             case START:
-                s.i = table[2 * s.key_or_hint];
-                s.j = table[2 * s.key_or_hint + 1];
+                ix.prefix_interval(s.key_or_hint, s.i, s.j);
                 if (s.i == s.j) {
                     out[s.offset] = hashes ? -1 : 0;
                     load(s);
@@ -683,7 +718,6 @@ void lookup_streaming(const index &ix, const ranks_t &bwt, const char *sequence,
                       out_t *out, unsigned batch_size, lookup_stats &stats) {
     const int k = ix.k;
     const int p = ix.prefix_length;
-    const uint64_t *table = ix.prefix_table.data();
     // Values of out while a segment is processed; a non-negative hash or 1 means found.
     const out_t UNRESOLVED = hashes ? -1 : 0;
     const out_t ABSENT[2] = {(out_t)(hashes ? -2 : 2), (out_t)(hashes ? -3 : 3)};
@@ -754,7 +788,7 @@ void lookup_streaming(const index &ix, const ranks_t &bwt, const char *sequence,
         for (int t = 0; t < p; ++t) key = (key << 2) | symbol(s, y + k - 1 - t);
         s.key = key;
         s.state = START;
-        __builtin_prefetch(table + 2 * key);
+        ix.prefix_prefetch(key);
     };
     std::function<void(slot &)> strand_done;
     // Search the highest unresolved window not above [from].
@@ -906,8 +940,7 @@ void lookup_streaming(const index &ix, const ranks_t &bwt, const char *sequence,
         for (slot &s : slots) {
             switch (s.state) {
             case START:
-                s.i = table[2 * s.key];
-                s.j = table[2 * s.key + 1];
+                ix.prefix_interval(s.key, s.i, s.j);
                 s.t = p;
                 after_search_step(s);
                 break;

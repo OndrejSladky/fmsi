@@ -427,7 +427,8 @@ static int usage_query2(bool lookup) {
   std::cerr << "            uses the kLCP array if the index has one" << std::endl;
   std::cerr << "  -L      - Do not use the kLCP array" << std::endl;
   std::cerr << "  -b INT  - Number of k-mers (or sequences if -S) searched at the same time; 1 turns batching off [default: 32]" << std::endl;
-  std::cerr << "  -p INT  - Length of the patterns with tabulated SA intervals; 0 turns the table off [default: 10]" << std::endl;
+  std::cerr << "  -p INT  - Length of the patterns with tabulated SA intervals (8 * 4^INT bytes); 0 turns the table off" << std::endl;
+  std::cerr << "            [default: 10; for an index2 --fast index, the largest of 10 to 12 with at most half a bit per row]" << std::endl;
   std::cerr << "  -t INT  - Number of threads searching; with more than one, the queries are also read and the output printed" << std::endl;
   std::cerr << "            by a thread each [default: 1]" << std::endl;
   std::cerr << "  -B INT  - Size of a block of sequences handed to a thread, in bytes of the query file [default: 1048576]" << std::endl;
@@ -609,7 +610,8 @@ int ms_query2(int argc, char *argv[], bool output_orders) {
 
   std::string query_fn = "-";
   int batch_size = 32;
-  int prefix_length = 10;
+  // -1: the default of the index (fmsi2::default_prefix_length).
+  int prefix_length = -1;
   bool streaming = false;
   bool use_klcp = true;
   int threads = 1;
@@ -653,7 +655,7 @@ int ms_query2(int argc, char *argv[], bool output_orders) {
   } else if (fn.empty()) {
     std::cerr << "ERROR: Prefix of the index is a required argument." << std::endl;
     return usage_query2(output_orders);
-  } else if (batch_size < 1 || threads < 1 || block_bases < 1 || prefix_length < 0 || prefix_length > 14) {
+  } else if (batch_size < 1 || threads < 1 || block_bases < 1 || prefix_length < -1 || prefix_length > 14) {
     std::cerr << "ERROR: The batch size, the block size and the number of threads must be positive and the table pattern length between 0 and 14." << std::endl;
     return usage_query2(output_orders);
   }
@@ -673,6 +675,7 @@ int ms_query2(int argc, char *argv[], bool output_orders) {
     fmsi2::load_klcp(index, fn + ".fmsi2.klcp");
   }
   double load_seconds = seconds_since_start();
+  if (prefix_length < 0) prefix_length = fmsi2::default_prefix_length(index);
   fmsi2::build_prefix_table(index, prefix_length);
   double table_seconds = seconds_since_start() - load_seconds;
 
@@ -688,6 +691,7 @@ int ms_query2(int argc, char *argv[], bool output_orders) {
             << "\tsteps_per_kmer=" << (lookups.kmers ? (double)lookups.steps / lookups.kmers : 0)
             << "\tsearches=" << lookups.searches << "\trechecks=" << lookups.rechecks
             << "\tklcp=" << index.has_klcp() << "\tstrands=" << index.strands << "\tthreads=" << threads
+            << "\ttable_length=" << index.prefix_length << "\ttable_bytes=" << index.prefix_table_bytes()
             << "\tload_s=" << load_seconds << "\ttable_s=" << table_seconds
             << "\tread_s=" << stats.read << "\tparse_s=" << stats.parse / threads
             << "\tscan_s=" << stats.scan / threads
