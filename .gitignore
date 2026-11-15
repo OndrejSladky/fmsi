@@ -66,3 +66,7 @@ src/sdsl-lite/test/compile_test.cpp
 
 # OpenMP setting of the last build
 src/openmp.setting
+
+# Index files of FMSI 2
+*.fmsi
+*.fmsi.klcp

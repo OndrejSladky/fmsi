@@ -10,6 +10,7 @@
 
 #include "../src/doubled.h"
 #include "../src/fms_index2.h"
+#include "../src/parser.h"
 #include "gtest/gtest.h"
 
 namespace {
@@ -722,6 +723,341 @@ TEST(FMS_INDEX2, SAVE_AND_LOAD) {
         fmsi2::lookup_batch<true, int64_t>(loaded, q.sequences.data(), q.offsets.data(), q.offsets.size(), got.data(),
                                            16, stats);
         EXPECT_EQ(want, got);
+    }
+}
+
+/// The lookups of an index: the hashes of all query k-mers.
+std::vector<int64_t> hashes_of(fmsi2::index &index, const queries &q) {
+    fmsi2::build_prefix_table(index, 6);
+    fmsi2::lookup_stats stats;
+    std::vector<int64_t> result(q.sequences.size(), -1);
+    fmsi2::lookup_batch<true, int64_t>(index, q.sequences.data(), q.offsets.data(), q.offsets.size(), result.data(), 16, stats);
+    return result;
+}
+
+/// An index file gives the same index in every layout, whichever way it was written, with its kLCP array.
+TEST(FMS_INDEX2, FILE_LAYOUTS) {
+    std::mt19937_64 rng(7);
+    const std::string path = testing::TempDir() + "fmsi2_layouts_test.fmsi";
+    for (int round = 0; round < 8; ++round) {
+        size_t k = std::vector<size_t>{3, 13, 31, 33}[round % 4];
+        std::string ms = random_mask(rng, random_superstring(rng, k + 100 + rng() % 70000), k, round % 2);
+        queries q = make_queries(rng, ms, k);
+        const bool both = round >= 4;
+        mbwt_with_same_kmer = true;
+        mbwt m = both ? doubled::compute_mbwt(ms, k, true) : k <= 32 ? compute_mbwt<uint64_t>(ms, k, true) : compute_mbwt<__uint128_t>(ms, k, true);
+        mbwt_with_same_kmer = false;
+        const sdsl::bit_vector klcp = m.klcp;
+        const fmsi2::mask_statistics statistics = fmsi2::classify_mask(m);
+        const fmsi2::description d = fmsi2::save_mbwt(m, k, both ? "fast" : "small", fmsi2::preset_layout(both ? "fast" : "small"),
+                                                      statistics, path, 1 + round % 3);
+        fmsi2::save_klcp_bits(klcp, k, d.uid(), path + ".klcp", 1 + round % 3);
+        fmsi2::index built;
+        fmsi2::build(built, m, k, fmsi2::mask_kind::plain);
+        const std::vector<int64_t> want = hashes_of(built, q);
+
+        for (uint32_t block_bytes : {0, 64, 128, 256}) {
+            for (int mask : {-1, 0, 1, 2}) {
+                fmsi2::layout layout;
+                layout.bwt_block_bytes = block_bytes;
+                layout.mask = mask;
+                fmsi2::index loaded;
+                fmsi2::load(loaded, path, 1 + (block_bytes / 64) % 3, layout);
+                ASSERT_EQ(loaded.k, k);
+                ASSERT_EQ(loaded.strands, both ? 2u : 1u);
+                ASSERT_EQ(loaded.size, built.size);
+                ASSERT_EQ(loaded.mask_ones, built.mask_ones);
+                ASSERT_EQ(loaded.preset, both ? "fast" : "small");
+                ASSERT_EQ(loaded.mask_type_name, statistics.type);
+                // The recommended layout is that of the preset.
+                if (block_bytes == 0) ASSERT_EQ(loaded.bwt.block_bytes(), both ? 64u : 256u);
+                if (mask < 0) ASSERT_EQ(loaded.mask_type, both ? fmsi2::mask_kind::plain : fmsi2::mask_kind::packed);
+                for (size_t i = 0; i < loaded.size; i += 1 + rng() % 7) ASSERT_EQ(loaded.mask_get(i), built.mask_get(i)) << "row " << i;
+                ASSERT_EQ(hashes_of(loaded, q), want) << "round " << round << " blocks " << block_bytes << " mask " << mask;
+                fmsi2::load_klcp(loaded, path + ".klcp", 2);
+                ASSERT_EQ(loaded.klcp, klcp);
+
+                // An index written from memory is the same file content-wise: it loads to the same index.
+                if (block_bytes == 128 && mask == (int)fmsi2::mask_kind::packed) {
+                    fmsi2::save(loaded, path + ".again", 2);
+                    fmsi2::index again;
+                    fmsi2::load(again, path + ".again");
+                    ASSERT_EQ(again.bwt.block_bytes(), 128u);
+                    ASSERT_EQ(again.mask_type, fmsi2::mask_kind::packed);
+                    ASSERT_EQ(hashes_of(again, q), want);
+                    // Its kLCP file is recognized by the identifier of the content.
+                    fmsi2::load_klcp(again, path + ".klcp");
+                    std::filesystem::remove(path + ".again");
+                }
+            }
+        }
+    }
+    std::filesystem::remove(path);
+    std::filesystem::remove(path + ".klcp");
+}
+
+/// Sections that a reader does not know are skipped unless they are required; damaged files are refused.
+TEST(FMS_INDEX2, FILE_SECTIONS) {
+    std::mt19937_64 rng(8);
+    const size_t k = 11;
+    std::string ms = random_mask(rng, random_superstring(rng, 5000000 / 100), k, true);
+    queries q = make_queries(rng, ms, k);
+    mbwt m = compute_mbwt<uint64_t>(ms, k, true);
+    const sdsl::bit_vector klcp = m.klcp;
+    const std::string path = testing::TempDir() + "fmsi2_sections_test.fmsi";
+    const fmsi2::description d = fmsi2::save_mbwt(m, k, "small", fmsi2::preset_layout("small"), fmsi2::mask_statistics(), path);
+    fmsi2::index reference;
+    fmsi2::load(reference, path);
+    const std::vector<int64_t> want = hashes_of(reference, q);
+    ASSERT_EQ(reference.mask_type_name, "");
+
+    // Copy the file section by section and add one that no reader knows.
+    auto copy_with = [&](uint32_t flags) {
+        fmsi2::file::reader in(path);
+        fmsi2::file::writer out(path + ".more");
+        for (const auto &e : in.sections()) {
+            const std::string content = in.read_all(e);
+            if (e.flags & fmsi2::file::DEFLATE) {
+                out.add_stream(e.name(), e.encoding, e.flags, e.items, content.size(), true, 2,
+                               [&](uint64_t begin, uint64_t end, uint8_t *buffer) { memcpy(buffer, content.data() + begin, end - begin); });
+            } else {
+                out.add(e.name(), e.encoding, e.flags, e.items, content.data(), content.size());
+            }
+        }
+        const std::string future = "something of a later version";
+        out.add("FUTURE", 7, flags, 1, future.data(), future.size());
+        out.finish();
+    };
+    copy_with(0);
+    {
+        fmsi2::index loaded;
+        fmsi2::load(loaded, path + ".more");
+        ASSERT_EQ(hashes_of(loaded, q), want);
+        fmsi2::file::reader in(path + ".more");
+        ASSERT_EQ(in.sections().size(), 4u);
+        ASSERT_EQ(in.read_all(in.get("FUTURE")), "something of a later version");
+    }
+    copy_with(fmsi2::file::REQUIRED);
+    {
+        fmsi2::index loaded;
+        ASSERT_THROW(fmsi2::load(loaded, path + ".more"), std::invalid_argument);
+    }
+    std::filesystem::remove(path + ".more");
+
+    // A kLCP file of another index is refused.
+    {
+        std::string other = random_mask(rng, random_superstring(rng, ms.size()), k, true);
+        mbwt n = compute_mbwt<uint64_t>(other, k, true);
+        const fmsi2::description e = fmsi2::save_mbwt(n, k, "small", fmsi2::preset_layout("small"), fmsi2::mask_statistics(), path + ".other");
+        fmsi2::save_klcp_bits(n.klcp, k, e.uid(), path + ".other.klcp");
+        fmsi2::save_klcp_bits(klcp, k, d.uid(), path + ".klcp");
+        ASSERT_NE(d.uid(), e.uid());
+        fmsi2::index loaded;
+        fmsi2::load(loaded, path);
+        ASSERT_THROW(fmsi2::load_klcp(loaded, path + ".other.klcp"), std::invalid_argument);
+        fmsi2::load_klcp(loaded, path + ".klcp");
+        ASSERT_EQ(loaded.klcp, klcp);
+        std::filesystem::remove(path + ".other");
+        std::filesystem::remove(path + ".other.klcp");
+        std::filesystem::remove(path + ".klcp");
+    }
+
+    // Truncated and damaged files.
+    std::ifstream in(path, std::ios::binary);
+    const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    in.close();
+    auto write = [&](const std::string &content) {
+        std::ofstream out(path + ".bad", std::ios::binary);
+        out.write(content.data(), content.size());
+    };
+    for (size_t size : {(size_t)0, (size_t)10, (size_t)24, bytes.size() / 2, bytes.size() - 1}) {
+        write(bytes.substr(0, size));
+        fmsi2::index loaded;
+        ASSERT_THROW(fmsi2::load(loaded, path + ".bad"), std::invalid_argument) << "size " << size;
+    }
+    {
+        // A flipped bit of the compressed mask: the chunk does not decompress, or the mask does not match.
+        fmsi2::file::reader table(path);
+        const fmsi2::file::section_entry &mask = table.get("MASK");
+        std::string damaged = bytes;
+        damaged[mask.offset + mask.stored_bytes / 3] ^= 0x10;
+        write(damaged);
+        fmsi2::index loaded;
+        ASSERT_THROW(fmsi2::load(loaded, path + ".bad"), std::invalid_argument);
+        // A flipped bit of the BWT is found by the checksum.
+        const fmsi2::file::section_entry &bwt = table.get("BWT");
+        damaged = bytes;
+        damaged[bwt.offset + bwt.stored_bytes / 2] ^= 0x01;
+        write(damaged);
+        fmsi2::file::reader bad(path + ".bad");
+        ASSERT_THROW(bad.read(bad.get("BWT"), 1, [](uint64_t, const uint8_t *, size_t) {}, true), std::invalid_argument);
+        bad.read(bad.get("MASK"), 1, [](uint64_t, const uint8_t *, size_t) {}, true);
+    }
+    std::filesystem::remove(path + ".bad");
+    std::filesystem::remove(path);
+}
+
+/// The type of the mask that the constructions compute, against its definition.
+TEST(FMS_INDEX2, MASK_TYPE) {
+    std::mt19937_64 rng(9);
+    auto computed = [&](const std::string &ms, size_t k, bool both) {
+        mbwt_with_same_kmer = true;
+        std::string copy = ms;
+        mbwt m = both ? doubled::compute_mbwt(copy, k, false, 1 + rng() % 3) : compute_mbwt<uint64_t>(copy, k, false, false, 1 + rng() % 3);
+        mbwt_with_same_kmer = false;
+        return fmsi2::classify_mask(m);
+    };
+    // By the definition: the occurrences and the set occurrences of every k-mer, of both strands if [canonical].
+    auto defined = [&](const std::string &ms, size_t k, bool canonical_kmers) {
+        std::map<std::string, std::pair<size_t, size_t>> seen;
+        for (size_t i = 0; i + k <= ms.size(); ++i) {
+            std::string kmer = ms.substr(i, k);
+            for (auto &c : kmer) c = toupper(c);
+            auto &entry = seen[canonical_kmers ? canonical(kmer) : kmer];
+            entry.first++;
+            entry.second += is_upper(ms[i]);
+        }
+        bool single = true, uniform = true;
+        size_t kmers = 0;
+        for (const auto &item : seen) {
+            if (item.second.second == 0) continue;
+            ++kmers;
+            single = single && item.second.second == 1;
+            uniform = uniform && item.second.second == item.second.first;
+        }
+        return std::make_pair(std::string(single && uniform ? "min-one,max-one" : single ? "min-one" : uniform ? "max-one" : "other"), kmers);
+    };
+    std::map<std::string, int> seen_types;
+    for (int round = 0; round < 200; ++round) {
+        size_t k = std::vector<size_t>{2, 3, 5, 13, 31}[rng() % 5];
+        std::string s = round % 5 == 4 ? random_dna(rng, k + rng() % 300) : random_superstring(rng, k + rng() % 600);
+        std::string ms;
+        switch (round % 4) {
+        case 0:
+            ms = random_mask(rng, s, k, true);
+            break;
+        case 1:
+            ms = random_mask(rng, s, k, false);
+            break;
+        default: {
+            // A max-one mask: a random set of canonical k-mers, all of whose occurrences are set.
+            std::set<std::string> chosen;
+            ms = s;
+            for (auto &c : ms) c = tolower(c);
+            for (size_t i = 0; i + k <= s.size(); ++i) {
+                if (rng() % 2) chosen.insert(canonical(s.substr(i, k)));
+            }
+            for (size_t i = 0; i + k <= s.size(); ++i) {
+                if (chosen.count(canonical(s.substr(i, k)))) ms[i] = toupper(ms[i]);
+            }
+            break;
+        }
+        }
+        for (bool both : {false, true}) {
+            const fmsi2::mask_statistics got = computed(ms, k, both);
+            const auto want = defined(ms, k, both);
+            ASSERT_EQ(got.source, both ? "computed" : "computed-one-strand");
+            ASSERT_EQ(got.type, want.first) << ms << " k " << k << " both " << both;
+            // A stated type is kept if the mask does not contradict it, and replaced with a warning if it does.
+            for (const std::string stated : {"min-one", "max-one"}) {
+                const fmsi2::mask_statistics by_header = fmsi2::decide_mask_type(got, "auto", stated);
+                const fmsi2::mask_statistics by_user = fmsi2::decide_mask_type(got, stated, stated == "min-one" ? "max-one" : "");
+                const bool holds = stated == "min-one" ? got.single : got.uniform;
+                ASSERT_EQ(by_header.warning.empty(), holds);
+                ASSERT_EQ(by_header.source, holds ? "header" : got.source);
+                ASSERT_EQ(by_user.source, holds ? "declared" : got.source);
+                const std::string kept = both && got.single && got.uniform ? "min-one,max-one" : stated;
+                ASSERT_EQ(by_header.type, holds ? kept : got.type);
+                ASSERT_EQ(by_user.type, holds ? kept : got.type);
+            }
+            if (!both) ASSERT_EQ(got.kmers, want.second) << ms;
+            seen_types[got.type]++;
+        }
+    }
+    // All four types occurred.
+    ASSERT_EQ(seen_types.size(), 4u);
+    // Without the rows of the same k-mers nothing is computed, and a stated type is taken as it is.
+    mbwt none;
+    ASSERT_EQ(fmsi2::classify_mask(none).type, "unknown");
+    ASSERT_EQ(fmsi2::decide_mask_type(fmsi2::classify_mask(none), "max-one", "min-one").type, "max-one");
+    ASSERT_EQ(fmsi2::decide_mask_type(fmsi2::classify_mask(none), "max-one", "min-one").source, "declared");
+    ASSERT_EQ(fmsi2::decide_mask_type(fmsi2::classify_mask(none), "auto", "min-one").source, "header");
+    ASSERT_EQ(fmsi2::decide_mask_type(fmsi2::classify_mask(none), "auto", "").type, "unknown");
+    // Fields of a FASTA header, as KmerCamel writes them.
+    const std::string header = "maskedsuperstring dataset='a b.fa' k=31 alg=greedy mask=min-one mode=bidirectional";
+    ASSERT_EQ(header_field(header, "mask"), "min-one");
+    ASSERT_EQ(header_field(header, "k"), "31");
+    ASSERT_EQ(header_field(header, "mode"), "bidirectional");
+    ASSERT_EQ(header_field(header, "ask"), "");
+    ASSERT_EQ(header_field("k=13", "k"), "13");
+}
+
+/// The Tunstall-coded bits built from a stream of words, for densities from sparse to dense.
+TEST(RANK2, PACKED_BITS_FROM_STREAM) {
+    std::mt19937_64 rng(10);
+    for (double density : {0.0, 0.001, 0.05, 0.3, 0.5, 0.77, 0.96, 0.999, 1.0}) {
+        for (size_t size : {(size_t)0, (size_t)1, (size_t)63, (size_t)64, (size_t)65, (size_t)1000, (size_t)70001, (size_t)300000}) {
+            std::vector<bool> bits(size);
+            size_t ones = 0;
+            for (size_t i = 0; i < size; ++i) {
+                bits[i] = (rng() % 1000000) < density * 1000000;
+                ones += bits[i];
+            }
+            fmsi2::tunstall_bits packed;
+            // Groups of 1 to 64 bits.
+            packed.build_stream(size, ones, [&](auto sink) {
+                for (size_t i = 0; i < size;) {
+                    const unsigned count = (unsigned)std::min<size_t>(size - i, i % 3 == 0 ? 64 : 1 + (i * 7) % 64);
+                    uint64_t word = 0;
+                    for (unsigned t = 0; t < count; ++t) word |= (uint64_t)bits[i + t] << t;
+                    sink(word, count);
+                    i += count;
+                }
+            });
+            ASSERT_EQ(packed.size(), size);
+            size_t rank = 0;
+            for (size_t i = 0; i < size; ++i) {
+                if (i % 17 == 0 || size < 2000) {
+                    ASSERT_EQ(packed.rank(i), rank) << "density " << density << " size " << size << " position " << i;
+                    ASSERT_EQ(packed[i], bits[i]) << "density " << density << " size " << size << " position " << i;
+                }
+                rank += bits[i];
+            }
+            ASSERT_EQ(packed.rank(size), ones);
+        }
+    }
+}
+
+/// The packed bytes of a sequence of 2-bit symbols, written and read in pieces.
+TEST(RANK2, PACKED_SYMBOLS_IN_PIECES) {
+    std::mt19937_64 rng(11);
+    for (uint32_t block_bytes : {64, 128, 256}) {
+        for (size_t size : {(size_t)1, (size_t)223, (size_t)224, (size_t)225, (size_t)100003}) {
+            std::vector<uint8_t> symbols(size), bytes((size + 3) / 4, 0);
+            for (size_t i = 0; i < size; ++i) {
+                symbols[i] = rng() % 4;
+                bytes[i / 4] |= symbols[i] << (2 * (i % 4));
+            }
+            fmsi2::quad_sequence sequence(size, block_bytes);
+            for (size_t first = 0; first < bytes.size();) {
+                const size_t count = std::min<size_t>(bytes.size() - first, 1 + rng() % 300);
+                sequence.set_packed(first, bytes.data() + first, count);
+                first += count;
+            }
+            sequence.finalize(2);
+            size_t ranks[4] = {0, 0, 0, 0};
+            for (size_t i = 0; i < size; ++i) {
+                for (uint8_t c = 0; c < 4; ++c) ASSERT_EQ(sequence.rank(i, c), ranks[c]);
+                ranks[symbols[i]]++;
+            }
+            std::vector<uint8_t> back(bytes.size(), 0xFF);
+            for (size_t first = 0; first < bytes.size();) {
+                const size_t count = std::min<size_t>(bytes.size() - first, 1 + rng() % 300);
+                sequence.get_packed(first, back.data() + first, count);
+                first += count;
+            }
+            ASSERT_EQ(back, bytes);
+        }
     }
 }
 

@@ -24,7 +24,9 @@
 #include <sdsl/bit_vectors.hpp>
 
 #include "fms_index.h"
+#include "index_file.h"
 #include "rank2.h"
+#include "version.h"
 
 namespace fmsi2 {
 
@@ -96,6 +98,22 @@ struct index {
     uint64_t mask_ones = 0;
     /// The same for the second sentinel (NO_ROW if there is none); the sentinels ordered by their rows.
     uint64_t dollar_rank2 = NO_ROW;
+
+    /// The preset the index was built with ("small" or "fast", "" if unknown) and the identifier of its content
+    /// (0 if unknown), by which its kLCP file is recognized.
+    std::string preset;
+    uint64_t uid = 0;
+    /// The type of the mask as the index file states it: "min-one" (every k-mer of the set has one set
+    /// occurrence, so that lookup is a minimal perfect hash), "max-one" (all occurrences of the k-mers of the
+    /// set are set), "min-one,max-one", "other", or "" if unknown; and how it is known ("computed", "declared").
+    std::string mask_type_name, mask_type_source;
+    /// The FASTA header of the masked superstring that was indexed, if the index file has it.
+    std::string superstring_header;
+
+    /// Bytes of the index in memory: the BWT, the mask, the kLCP array, the table of patterns and the hints.
+    size_t bytes() const {
+        return bwt.bytes() + mask_bytes() + (klcp.size() + 7) / 8 + prefix_table_bytes() + bwt.select_hint_bytes();
+    }
 
     index() = default;
     index(const index &) = delete;
@@ -236,6 +254,84 @@ inline void prepare_access(index &ix) {
 /// too, guessing from the superblocks.
 inline void build_access_support(index &ix) { ix.bwt.build_select_hints(); }
 
+/// The type of a mask. FMSI answers membership queries the fastest on a max-one mask (all occurrences of the
+/// k-mers of the set are set, so the first bit of an interval decides) and dictionary queries on a min-one mask
+/// (one set occurrence per k-mer, so the rank of the interval is a minimal perfect hash). FMSI 2 tests any mask
+/// in constant time, so the type matters for the hashes only: with a mask other than min-one they stay unique
+/// per set occurrence, but a k-mer set several times has several, and their range exceeds the number of k-mers.
+///
+/// The type is computed from the rows that start with the same k-mer (mbwt::same_kmer). For an index of both
+/// strands these hold the occurrences of a k-mer and of its reverse complement, so the type is exact. For an
+/// index of one strand a k-mer and its reverse complement are not related to each other: a mask found min-one
+/// may still set a k-mer once in each orientation (masks of KmerCamel in its bidirectional mode never do). The
+/// type that the producer of the masked superstring states in its FASTA header (mask=min-one) or the user gives
+/// is therefore preferred, and what is computed checks it.
+struct mask_statistics {
+    /// "min-one", "max-one", "min-one,max-one" (each k-mer of the set occurs once), "other" or "unknown".
+    std::string type = "unknown";
+    /// "computed" (exact: both strands), "computed-one-strand", "header" (of the masked superstring),
+    /// "declared" (by the user), or empty.
+    std::string source;
+    /// Whether the type was computed, and what was found: no k-mer with several set occurrences; no k-mer of
+    /// the set with an unset occurrence.
+    bool computed = false, single = false, uniform = false;
+    /// Number of different k-mers of the text with a set occurrence (computed only).
+    uint64_t kmers = 0;
+    /// Set if a stated type contradicts what was computed.
+    std::string warning;
+};
+
+/// The type of the mask computed from the MBWT (needs mbwt::same_kmer; "unknown" without it).
+inline mask_statistics classify_mask(const mbwt &m) {
+    mask_statistics result;
+    if (m.bwt.empty() || m.same_kmer.size() != m.bwt.size()) return result;
+    bool single = true, uniform = true;
+    uint64_t ones = 0, length = 0;
+    const size_t rows = m.bwt.size();
+    const bool palindromes = m.palindrome.size() == rows;
+    for (size_t i = 0; i < rows; ++i) {
+        ones += m.sa_transformed_mask[i];
+        ++length;
+        if (!m.same_kmer[i]) {
+            if (ones > 0) {
+                ++result.kmers;
+                // A k-mer that is its own reverse complement occurs twice among the rows of both strands.
+                const uint64_t once = palindromes && m.palindrome[i] ? 2 : 1;
+                single = single && ones == once;
+                uniform = uniform && ones == length;
+            }
+            ones = length = 0;
+        }
+    }
+    result.computed = true;
+    result.single = single;
+    result.uniform = uniform;
+    result.type = single && uniform ? "min-one,max-one" : single ? "min-one" : uniform ? "max-one" : "other";
+    result.source = m.dollar_position2 == mbwt::NO_ROW ? "computed-one-strand" : "computed";
+    return result;
+}
+
+/// The type of the mask given what was computed and what was stated: by the user ([declared]: "min-one",
+/// "max-one", or "auto" for nothing) or in the header of the masked superstring ([header_type], may be empty).
+/// A stated type is kept unless the computed one contradicts it.
+inline mask_statistics decide_mask_type(mask_statistics computed, const std::string &declared, const std::string &header_type) {
+    const bool by_user = declared == "min-one" || declared == "max-one";
+    const bool by_header = !by_user && (header_type == "min-one" || header_type == "max-one");
+    if (!by_user && !by_header) return computed;
+    const std::string stated = by_user ? declared : header_type;
+    if (computed.computed && ((stated == "min-one" && !computed.single) || (stated == "max-one" && !computed.uniform))) {
+        computed.warning = "the mask is stated to be " + stated + (by_user ? " (-M)" : " (in the header of the masked superstring)") +
+                           ", but it is not: " + (stated == "min-one" ? "a k-mer has several set occurrences" : "a k-mer of the set has an unset occurrence") +
+                           "; its type is recorded as " + computed.type;
+        return computed;
+    }
+    // Exactly known to be both: each k-mer of the set occurs once.
+    const bool both = computed.computed && computed.source == "computed" && computed.single && computed.uniform;
+    computed.type = both ? "min-one,max-one" : stated;
+    computed.source = by_user ? "declared" : "header";
+    return computed;
+}
+
 /// Build the index from the MBWT, which is consumed.
 void build(index &ix, mbwt &m, int k, mask_kind mask_type, uint32_t bwt_block_bytes = 64, unsigned threads = 1) {
     ix.k = k;
@@ -244,6 +340,10 @@ void build(index &ix, mbwt &m, int k, mask_kind mask_type, uint32_t bwt_block_by
     ix.dollar_position2 = m.dollar_position2 == mbwt::NO_ROW ? NO_ROW : m.dollar_position2;
     // A second sentinel separates the superstring from its reverse complement (doubled.h).
     ix.strands = ix.dollar_position2 == NO_ROW ? 1 : 2;
+    ix.preset = ix.strands == 2 ? "fast" : "small";
+    const mask_statistics statistics = classify_mask(m);
+    ix.mask_type_name = statistics.type == "unknown" ? "" : statistics.type;
+    ix.mask_type_source = statistics.source;
     ix.klcp = std::move(m.klcp);
 
     ix.bwt = quad_sequence(m.bwt.size(), bwt_block_bytes);
@@ -292,12 +392,66 @@ void build(index &ix, mbwt &m, int k, mask_kind mask_type, uint32_t bwt_block_by
     build_phases.lap("pack_mask");
 }
 
-static const char MAGIC[8] = {'F', 'M', 'S', 'I', '2', 'I', 'D', 'X'};
-/// Version 4 stores the BWT as 2-bit characters without rank counts and the mask as an RRR vector, as FMSI does
-/// (2 bits and 0.2-0.9 bits per character on disk); both are expanded into the structures of the index when it
-/// is loaded, whose queries are thus unchanged. Version 3 stored those structures as they are in memory and adds
-/// to version 2 the number of strands and the second sentinel; version 2 is read as one strand.
-static const uint32_t FORMAT_VERSION = 4;
+/// The layout of an index in memory. It is chosen when the index is loaded, as the file holds the BWT and the
+/// mask in a form of its own; the file recommends one (that of its preset).
+struct layout {
+    /// Bytes per block of the BWT (64, 128 or 256); 0 stands for the recommended one.
+    uint32_t bwt_block_bytes = 0;
+    /// Encoding of the mask (a mask_kind); -1 stands for the recommended one.
+    int mask = -1;
+};
+
+/// The layouts of the presets: --small takes the least memory (blocks of 256 bytes, the Tunstall-coded mask),
+/// --fast answers the fastest (blocks of 64 bytes, i.e. one cache line per rank, and the plain mask).
+inline layout preset_layout(const std::string &preset) {
+    layout result;
+    result.bwt_block_bytes = preset == "fast" ? 64 : 256;
+    result.mask = (int)(preset == "fast" ? mask_kind::plain : mask_kind::packed);
+    return result;
+}
+
+inline const char *mask_name(mask_kind kind) {
+    return kind == mask_kind::plain ? "plain" : kind == mask_kind::packed ? "packed" : "rrr";
+}
+
+inline bool parse_mask_name(const std::string &name, mask_kind &kind) {
+    if (name == "plain") {
+        kind = mask_kind::plain;
+    } else if (name == "packed") {
+        kind = mask_kind::packed;
+    } else if (name == "rrr") {
+        kind = mask_kind::rrr;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+/// Format 5 (index_file.h): one file with tagged sections. The sections of an index:
+///   META  text, key=value per line (below)
+///   BWT   encoding 1: the characters of the BWT, 2 bits each, 4 per byte (character i at bits 2 (i % 4) of
+///         byte i / 4), the sentinels stored as A; not compressed, as it does not compress
+///   MASK  encoding 1: the mask in the order of the suffix array, one bit per row (bit i at bit i % 8 of byte
+///         i / 8); compressed
+/// The kLCP array is a file of its own (<index file>.klcp) with META and
+///   KLCP  encoding 1: one bit per row (bit i is set iff rows i and i + 1 share their first k - 1 characters);
+///         compressed
+/// The rank counts of the BWT and of the mask, the table of the first search steps and the hints of select
+/// are not stored: they are computed when the file is loaded, in the layout asked for.
+///
+/// Keys of META of an index: kind (index), creator, k, strands (1; 2 if the reverse complement of the superstring
+/// is indexed too), preset (small, fast), rows (the length of the BWT), dollar and dollar2 (the rows of the
+/// sentinels), counts (the four cumulative character counts), mask_ones, mask_order (sa), layout (the recommended
+/// layout in memory: bytes per block of the BWT and the mask encoding), uid (an identifier of the content, which
+/// the kLCP file repeats as index_uid). Unknown keys are ignored.
+static const uint32_t FORMAT_VERSION = 5;
+static const uint32_t ENCODING_BWT_PACKED = 1;
+static const uint32_t ENCODING_MASK_SA_BITS = 1;
+static const uint32_t ENCODING_KLCP_BITS = 1;
+static const char *const INDEX_EXTENSION = ".fmsi";
+static const char *const KLCP_EXTENSION = ".klcp";
+/// The files of the prototype (formats 2 to 4), still read.
+static const char *const OLD_INDEX_EXTENSION = ".fmsi2";
 
 /// The mask as a bitvector, whatever its encoding.
 inline sdsl::bit_vector mask_bits(const index &ix) {
@@ -308,36 +462,190 @@ inline sdsl::bit_vector mask_bits(const index &ix) {
     return bits;
 }
 
-void save(const index &ix, const std::string &path) {
-    std::ofstream out(path, std::ios::binary);
-    if (!out) throw std::invalid_argument("couldn't open file " + path);
-    out.write(MAGIC, sizeof(MAGIC));
-    write_pod(out, FORMAT_VERSION);
-    write_pod(out, ix.k);
-    write_pod(out, ix.strands);
-    write_pod(out, ix.size);
-    write_pod(out, ix.dollar_position);
-    write_pod(out, ix.dollar_position2);
-    for (int c = 0; c < 4; ++c) write_pod(out, ix.counts[c]);
-    write_pod(out, (uint32_t)ix.mask_type);
-    ix.bwt.write_packed(out);
-    if (ix.mask_type == mask_kind::rrr) {
-        ix.mask_rrr.serialize(out);
-    } else {
-        sdsl::rrr_vector<RRR_BLOCK_SIZE>(mask_bits(ix)).serialize(out);
+/// What a file says about its index besides the BWT and the mask.
+struct description {
+    uint32_t k = 0;
+    uint32_t strands = 1;
+    uint64_t rows = 0;
+    uint64_t dollar_position = 0;
+    uint64_t dollar_position2 = NO_ROW;
+    uint64_t counts[4] = {0, 0, 0, 0};
+    uint64_t mask_ones = 0;
+    std::string preset;
+    layout recommended;
+    /// The type of the mask and how it is known (mask_statistics), and the FASTA header of the masked superstring.
+    std::string mask_type, mask_type_source, superstring_header;
+
+    /// An identifier of the content: a hash of the numbers above, which two different indexes hardly share.
+    uint64_t uid() const {
+        uint64_t hash = 1469598103934665603ULL;
+        auto mix = [&](uint64_t value) {
+            for (int byte = 0; byte < 8; ++byte) {
+                hash ^= (value >> (8 * byte)) & 255;
+                hash *= 1099511628211ULL;
+            }
+        };
+        mix(k);
+        mix(strands);
+        mix(rows);
+        mix(dollar_position);
+        mix(dollar_position2);
+        for (int c = 0; c < 4; ++c) mix(counts[c]);
+        mix(mask_ones);
+        return hash;
     }
-    if (!out) throw std::invalid_argument("couldn't write file " + path);
+};
+
+inline std::string hex(uint64_t value) {
+    char buffer[17];
+    snprintf(buffer, sizeof(buffer), "%016llx", (unsigned long long)value);
+    return buffer;
 }
 
-/// Load an index; the rank counts of the BWT and the mask of version 4 are built on the given threads.
-void load(index &ix, const std::string &path, unsigned threads = 1) {
+inline std::string creator() { return std::string("fmsi ") + VERSION; }
+
+/// Write an index file. bwt(begin, end, buffer) gives the bytes [begin, end) of the packed BWT, mask(begin, end,
+/// buffer) those of the mask; both are called from several threads.
+inline void write_index_file(const std::string &path, const description &d,
+                             const std::function<void(uint64_t, uint64_t, uint8_t *)> &bwt,
+                             const std::function<void(uint64_t, uint64_t, uint8_t *)> &mask, unsigned threads = 1) {
+    file::metadata meta;
+    meta.set("kind", "index");
+    meta.set("creator", creator());
+    meta.set("k", d.k);
+    meta.set("strands", d.strands);
+    meta.set("preset", d.preset);
+    meta.set("rows", d.rows);
+    meta.set("dollar", d.dollar_position);
+    if (d.dollar_position2 != NO_ROW) meta.set("dollar2", d.dollar_position2);
+    meta.set("counts", std::to_string(d.counts[0]) + "," + std::to_string(d.counts[1]) + "," + std::to_string(d.counts[2]) +
+                           "," + std::to_string(d.counts[3]));
+    meta.set("mask_ones", d.mask_ones);
+    meta.set("mask_type", d.mask_type.empty() ? "unknown" : d.mask_type);
+    if (!d.mask_type_source.empty()) meta.set("mask_type_source", d.mask_type_source);
+    if (!d.superstring_header.empty()) meta.set("superstring_header", d.superstring_header);
+    meta.set("mask_order", "sa");
+    meta.set("layout", std::to_string(d.recommended.bwt_block_bytes) + "," + mask_name((mask_kind)d.recommended.mask));
+    meta.set("uid", hex(d.uid()));
+    const std::string text = meta.text();
+
+    file::writer out(path);
+    out.add("META", 1, file::REQUIRED, meta.items().size(), text.data(), text.size());
+    out.add_stream("BWT", ENCODING_BWT_PACKED, file::REQUIRED, d.rows, (d.rows + 3) / 4, false, threads, bwt);
+    out.add_stream("MASK", ENCODING_MASK_SA_BITS, file::REQUIRED, d.rows, (d.rows + 7) / 8, true, threads, mask);
+    out.finish();
+}
+
+/// Bytes [begin, end) of a bit vector of sdsl, bit i at bit i % 8 of byte i / 8.
+inline void bit_vector_bytes(const sdsl::bit_vector &bits, uint64_t begin, uint64_t end, uint8_t *buffer) {
+    // The words of the vector cover its bits; a byte past them is zero.
+    const uint64_t available = ((bits.size() + 63) / 64) * 8;
+    const uint64_t stop = std::min(end, available);
+    if (begin < stop) memcpy(buffer, reinterpret_cast<const uint8_t *>(bits.data()) + begin, stop - begin);
+    if (stop < end) memset(buffer + (std::max(begin, stop) - begin), 0, end - std::max(begin, stop));
+}
+
+/// Write the index of an MBWT to a file, without building the index in memory. Returns its description.
+inline description save_mbwt(const mbwt &m, int k, const std::string &preset, layout recommended, const mask_statistics &statistics,
+                             const std::string &path, unsigned threads = 1, const std::string &superstring_header = "") {
+    description d;
+    d.k = k;
+    d.rows = m.bwt.size();
+    d.dollar_position = m.dollar_position;
+    d.dollar_position2 = m.dollar_position2 == mbwt::NO_ROW ? NO_ROW : m.dollar_position2;
+    d.strands = d.dollar_position2 == NO_ROW ? 1 : 2;
+    d.preset = preset;
+    d.recommended = recommended;
+    d.mask_type = statistics.type;
+    d.mask_type_source = statistics.source;
+    // One line of the metadata.
+    d.superstring_header = superstring_header;
+    std::replace(d.superstring_header.begin(), d.superstring_header.end(), '\n', ' ');
+    std::vector<std::array<uint64_t, 4>> counted(threads, std::array<uint64_t, 4>{0, 0, 0, 0});
+    parallel_chunks(m.bwt.size(), threads, parallel_chunk(4), [&](size_t begin, size_t end, unsigned thread) {
+        uint64_t local[4] = {0, 0, 0, 0};
+        for (size_t i = begin; i < end; ++i) local[m.bwt[i]]++;
+        for (int c = 0; c < 4; ++c) counted[thread][c] += local[c];
+    });
+    uint64_t totals[4] = {0, 0, 0, 0};
+    for (const auto &part : counted) {
+        for (int c = 0; c < 4; ++c) totals[c] += part[c];
+    }
+    // The count of A includes the sentinels, which stand for the smallest suffixes.
+    d.counts[0] = 1 + (d.dollar_position2 != NO_ROW);
+    d.counts[1] = totals[0];
+    d.counts[2] = totals[0] + totals[1];
+    d.counts[3] = totals[0] + totals[1] + totals[2];
+    const uint64_t *words = m.sa_transformed_mask.data();
+    for (size_t w = 0; w < (m.sa_transformed_mask.size() + 63) / 64; ++w) d.mask_ones += __builtin_popcountll(words[w]);
+    write_index_file(
+        path, d,
+        [&](uint64_t begin, uint64_t end, uint8_t *buffer) {
+            for (uint64_t b = begin; b < end; ++b) {
+                uint8_t packed = 0;
+                for (uint64_t i = 4 * b; i < std::min<uint64_t>(4 * b + 4, d.rows); ++i) packed |= m.bwt[i] << (2 * (i & 3));
+                buffer[b - begin] = packed;
+            }
+        },
+        [&](uint64_t begin, uint64_t end, uint8_t *buffer) { bit_vector_bytes(m.sa_transformed_mask, begin, end, buffer); }, threads);
+    return d;
+}
+
+inline description describe(const index &ix) {
+    description d;
+    d.k = ix.k;
+    d.strands = ix.strands;
+    d.rows = ix.size;
+    d.dollar_position = ix.dollar_position;
+    d.dollar_position2 = ix.dollar_position2;
+    for (int c = 0; c < 4; ++c) d.counts[c] = ix.counts[c];
+    d.mask_ones = ix.mask_ones;
+    d.preset = ix.preset;
+    d.recommended.bwt_block_bytes = ix.bwt.block_bytes();
+    d.recommended.mask = (int)ix.mask_type;
+    d.mask_type = ix.mask_type_name;
+    d.mask_type_source = ix.mask_type_source;
+    d.superstring_header = ix.superstring_header;
+    return d;
+}
+
+/// Write an index that is in memory to a file; the file recommends its layout, or the given one.
+inline void save(const index &ix, const std::string &path, unsigned threads = 1, const layout *recommended = nullptr) {
+    description d = describe(ix);
+    if (recommended != nullptr) d.recommended = *recommended;
+    write_index_file(
+        path, d, [&](uint64_t begin, uint64_t end, uint8_t *buffer) { ix.bwt.get_packed(begin, buffer, end - begin); },
+        [&](uint64_t begin, uint64_t end, uint8_t *buffer) {
+            for (uint64_t b = begin; b < end; ++b) {
+                uint8_t byte = 0;
+                for (uint64_t i = 8 * b; i < std::min<uint64_t>(8 * b + 8, ix.size); ++i) byte |= (uint8_t)ix.mask_get(i) << (i & 7);
+                buffer[b - begin] = byte;
+            }
+        },
+        threads);
+}
+
+/// The bits of the pieces of a section, 64 at a time: sink(first bit, word, count).
+template <typename sink_t>
+inline void for_each_word(uint64_t offset, const uint8_t *data, size_t bytes, uint64_t total_bits, sink_t sink) {
+    if (offset % 8 != 0) throw std::logic_error("pieces of a section must start at whole words");
+    for (size_t b = 0; b < bytes && 8 * (offset + b) < total_bits; b += 8) {
+        uint64_t word = 0;
+        memcpy(&word, data + b, std::min<size_t>(8, bytes - b));
+        const uint64_t first = 8 * (offset + b);
+        sink(first, word, (unsigned)std::min<uint64_t>(64, total_bits - first));
+    }
+}
+
+/// Load an index of the prototype (formats 2 to 4), in the layout it was stored for.
+inline void load_old(index &ix, const std::string &path, unsigned threads) {
     std::ifstream in(path, std::ios::binary);
     if (!in) throw std::invalid_argument("couldn't open file " + path);
-    char magic[sizeof(MAGIC)];
-    in.read(magic, sizeof(MAGIC));
+    char magic[sizeof(file::MAGIC)];
+    in.read(magic, sizeof(magic));
     uint32_t version = 0, mask_type = 0;
     read_pod(in, version);
-    if (!in || memcmp(magic, MAGIC, sizeof(MAGIC)) != 0 || version < 2 || version > FORMAT_VERSION) {
+    if (!in || memcmp(magic, file::MAGIC, sizeof(magic)) != 0 || version < 2 || version > 4) {
         throw std::invalid_argument("file " + path + " is not an FMSI 2 index of a supported version");
     }
     read_pod(in, ix.k);
@@ -351,6 +659,7 @@ void load(index &ix, const std::string &path, unsigned threads = 1) {
     for (int c = 0; c < 4; ++c) read_pod(in, ix.counts[c]);
     read_pod(in, mask_type);
     ix.mask_type = (mask_kind)mask_type;
+    ix.preset = ix.strands == 2 ? "fast" : "small";
     if (version >= 4) {
         ix.bwt.read_packed(in, threads);
         sdsl::rrr_vector<RRR_BLOCK_SIZE> rrr;
@@ -390,26 +699,174 @@ void load(index &ix, const std::string &path, unsigned threads = 1) {
     }
     if (!in) throw std::invalid_argument("file " + path + " is truncated");
     prepare_access(ix);
+    ix.uid = 0;
 }
 
-/// The kLCP array is kept in a file of its own, as it is needed for streaming only.
-void save_klcp(const index &ix, const std::string &path) {
-    if (!sdsl::store_to_file(ix.klcp, path)) throw std::invalid_argument("couldn't write file " + path);
+/// The description of an index file (format 5).
+inline description read_description(const file::reader &in) {
+    const file::metadata meta = in.meta();
+    if (meta.get("kind") != "index") throw std::invalid_argument("file " + in.path() + " is not an index of FMSI 2");
+    description d;
+    d.k = (uint32_t)meta.number("k");
+    d.strands = (uint32_t)meta.number("strands", 1);
+    d.rows = meta.number("rows");
+    d.dollar_position = meta.number("dollar");
+    d.dollar_position2 = meta.number("dollar2", NO_ROW);
+    d.mask_ones = meta.number("mask_ones");
+    d.preset = meta.get("preset");
+    d.mask_type = meta.get("mask_type", "unknown");
+    d.mask_type_source = meta.get("mask_type_source");
+    d.superstring_header = meta.get("superstring_header");
+    std::istringstream counts(meta.get("counts"));
+    std::string item;
+    for (int c = 0; c < 4; ++c) {
+        if (!std::getline(counts, item, ',')) throw std::invalid_argument("file " + in.path() + " has no character counts");
+        d.counts[c] = std::stoull(item);
+    }
+    d.recommended = preset_layout(d.preset);
+    const std::string recommended = meta.get("layout");
+    const size_t comma = recommended.find(',');
+    if (comma != std::string::npos) {
+        mask_kind kind;
+        const uint32_t block_bytes = (uint32_t)std::stoul(recommended.substr(0, comma));
+        if (quad_sequence::valid_block_bytes(block_bytes)) d.recommended.bwt_block_bytes = block_bytes;
+        if (parse_mask_name(recommended.substr(comma + 1), kind)) d.recommended.mask = (int)kind;
+    }
+    if (d.strands != 1 && d.strands != 2) throw std::invalid_argument("file " + in.path() + " has an unsupported number of strands");
+    if (meta.get("mask_order", "sa") != "sa") {
+        throw std::invalid_argument("file " + in.path() + " stores its mask in an order that this version of FMSI does not know");
+    }
+    return d;
 }
 
-void load_klcp(index &ix, const std::string &path) {
-    if (!sdsl::load_from_file(ix.klcp, path) || ix.klcp.size() != ix.size) {
+/// Load an index in the given layout (by default the one the file recommends). The BWT is read into its blocks
+/// and the mask decoded into its encoding piece by piece, so that the peak memory is that of the loaded index;
+/// the rank counts are computed on the given threads.
+inline void load(index &ix, const std::string &path, unsigned threads = 1, layout wanted = layout()) {
+    const uint32_t version = file::file_version(path);
+    if (version >= 2 && version <= 4) {
+        load_old(ix, path, threads);
+        return;
+    }
+    file::reader in(path);
+    in.check_known({"META", "BWT", "MASK"});
+    const description d = read_description(in);
+    ix.k = d.k;
+    ix.strands = d.strands;
+    ix.size = d.rows;
+    ix.dollar_position = d.dollar_position;
+    ix.dollar_position2 = d.dollar_position2;
+    for (int c = 0; c < 4; ++c) ix.counts[c] = d.counts[c];
+    ix.preset = d.preset;
+    ix.uid = d.uid();
+    ix.mask_type_name = d.mask_type == "unknown" ? "" : d.mask_type;
+    ix.mask_type_source = d.mask_type_source;
+    ix.superstring_header = d.superstring_header;
+    const uint32_t block_bytes = wanted.bwt_block_bytes ? wanted.bwt_block_bytes : d.recommended.bwt_block_bytes;
+    ix.mask_type = (mask_kind)(wanted.mask >= 0 ? wanted.mask : d.recommended.mask);
+    if (!quad_sequence::valid_block_bytes(block_bytes)) throw std::invalid_argument("unsupported size of the blocks of the BWT");
+
+    const file::section_entry &bwt = in.get("BWT");
+    if (bwt.encoding != ENCODING_BWT_PACKED || bwt.items != d.rows || bwt.raw_bytes != (d.rows + 3) / 4) {
+        throw std::invalid_argument("file " + path + " stores its BWT in a form that this version of FMSI does not know");
+    }
+    ix.bwt = quad_sequence(d.rows, block_bytes);
+    in.read(bwt, threads, [&](uint64_t offset, const uint8_t *data, size_t bytes) { ix.bwt.set_packed(offset, data, bytes); });
+    ix.bwt.finalize(threads);
+
+    const file::section_entry &mask = in.get("MASK");
+    if (mask.encoding != ENCODING_MASK_SA_BITS || mask.items != d.rows || mask.raw_bytes != (d.rows + 7) / 8) {
+        throw std::invalid_argument("file " + path + " stores its mask in a form that this version of FMSI does not know");
+    }
+    if (ix.mask_type == mask_kind::plain) {
+        ix.mask = bit_rank(d.rows);
+        in.read(mask, threads, [&](uint64_t offset, const uint8_t *data, size_t bytes) {
+            for_each_word(offset, data, bytes, d.rows, [&](uint64_t first, uint64_t word, unsigned count) { ix.mask.set_bits(first, word, count); });
+        });
+        ix.mask.finalize(threads);
+    } else if (ix.mask_type == mask_kind::packed) {
+        ix.mask_packed.build_stream(d.rows, d.mask_ones, [&](auto sink) {
+            in.read(mask, threads, [&](uint64_t offset, const uint8_t *data, size_t bytes) {
+                for_each_word(offset, data, bytes, d.rows, [&](uint64_t, uint64_t word, unsigned count) { sink(word, count); });
+            });
+        });
+    } else {
+        sdsl::bit_vector bits(d.rows, 0);
+        in.read(mask, threads, [&](uint64_t offset, const uint8_t *data, size_t bytes) {
+            for_each_word(offset, data, bytes, d.rows, [&](uint64_t first, uint64_t word, unsigned count) { bits.set_int(first, word, count); });
+        });
+        ix.mask_rrr = sdsl::rrr_vector<RRR_BLOCK_SIZE>(bits);
+        ix.mask_rrr_rank = sdsl::rank_support_rrr<1, RRR_BLOCK_SIZE>(&ix.mask_rrr);
+    }
+    prepare_access(ix);
+    if (ix.mask_ones != d.mask_ones) throw std::invalid_argument("file " + path + " is damaged: the mask does not match its description");
+}
+
+/// The kLCP array is kept in a file of its own, as it is needed for streaming only: META (kind klcp, k, rows,
+/// klcp_ones, index_uid) and the bits, compressed.
+inline void save_klcp_bits(const sdsl::bit_vector &klcp, uint32_t k, uint64_t uid, const std::string &path, unsigned threads = 1) {
+    uint64_t ones = 0;
+    for (size_t w = 0; w < (klcp.size() + 63) / 64; ++w) ones += __builtin_popcountll(klcp.data()[w]);
+    file::metadata meta;
+    meta.set("kind", "klcp");
+    meta.set("creator", creator());
+    meta.set("k", k);
+    meta.set("rows", klcp.size());
+    meta.set("klcp_ones", ones);
+    meta.set("index_uid", hex(uid));
+    const std::string text = meta.text();
+    file::writer out(path);
+    out.add("META", 1, file::REQUIRED, meta.items().size(), text.data(), text.size());
+    out.add_stream("KLCP", ENCODING_KLCP_BITS, file::REQUIRED, klcp.size(), (klcp.size() + 7) / 8, true, threads,
+                   [&](uint64_t begin, uint64_t end, uint8_t *buffer) { bit_vector_bytes(klcp, begin, end, buffer); });
+    out.finish();
+}
+
+inline void save_klcp(const index &ix, const std::string &path, unsigned threads = 1) {
+    save_klcp_bits(ix.klcp, ix.k, describe(ix).uid(), path, threads);
+}
+
+inline void load_klcp(index &ix, const std::string &path, unsigned threads = 1) {
+    if (file::file_version(path) == 0) {
+        // The kLCP file of the prototype: a bit vector of sdsl.
+        if (!sdsl::load_from_file(ix.klcp, path) || ix.klcp.size() != ix.size) {
+            throw std::invalid_argument("file " + path + " is not the kLCP array of the index");
+        }
+        return;
+    }
+    file::reader in(path);
+    in.check_known({"META", "KLCP"});
+    const file::metadata meta = in.meta();
+    const file::section_entry &bits = in.get("KLCP");
+    if (meta.get("kind") != "klcp" || meta.number("rows") != ix.size || bits.encoding != ENCODING_KLCP_BITS ||
+        bits.items != ix.size || bits.raw_bytes != (ix.size + 7) / 8 || (ix.uid != 0 && meta.get("index_uid") != hex(ix.uid))) {
         throw std::invalid_argument("file " + path + " is not the kLCP array of the index");
     }
+    ix.klcp = sdsl::bit_vector(ix.size, 0);
+    in.read(bits, threads, [&](uint64_t offset, const uint8_t *data, size_t bytes) {
+        for_each_word(offset, data, bytes, ix.size, [&](uint64_t first, uint64_t word, unsigned count) { ix.klcp.set_int(first, word, count); });
+    });
 }
 
-/// The default length of the tabulated patterns: 10 for an index of one strand; for one of both strands
-/// (index2 --fast) the largest length from 10 to 12 whose table (8 * 4^length bytes) takes at most half a
-/// bit per row of the BWT.
+/// The file of an index given as the file itself, or as the name without its extension (a prefix, as the
+/// commands of FMSI took it); an index of the prototype (<prefix>.fmsi2) is found too. Empty if there is none.
+inline std::string find_index_file(const std::string &name) {
+    auto is_file = [](const std::string &path) { return file::file_version(path) != 0; };
+    if (is_file(name)) return name;
+    if (is_file(name + INDEX_EXTENSION)) return name + INDEX_EXTENSION;
+    if (is_file(name + OLD_INDEX_EXTENSION)) return name + OLD_INDEX_EXTENSION;
+    return "";
+}
+
+/// The default length of the tabulated patterns, by the layout of the index: the table (8 * 4^length bytes)
+/// takes at most half a bit per row of the BWT in the fast layout (blocks of 64 bytes and the plain mask) and at
+/// most 1/32 bit per row in a compact one, so that it stays about one per cent of the index. The length is
+/// between 4 and 12 (at least 10 in the fast layout, as before the layouts were chosen at load).
 inline unsigned default_prefix_length(const index &ix) {
-    if (ix.strands == 1) return 10;
-    unsigned length = 10;
-    while (length < 12 && 8.0 * ((uint64_t)1 << (2 * (length + 1))) <= ix.size / 16.0) ++length;
+    const bool fast = ix.bwt.block_bytes() == 64 && ix.mask_type == mask_kind::plain;
+    const double budget_bits = fast ? ix.size / 2.0 : ix.size / 32.0;
+    unsigned length = fast ? 10 : 4;
+    while (length < 12 && 64.0 * ((uint64_t)1 << (2 * (length + 1))) <= budget_bits) ++length;
     return length;
 }
 

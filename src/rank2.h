@@ -515,6 +515,37 @@ class quad_rank {
         }
     }
 
+    /// Set the symbols of the bytes [first, first + count) of the sequence packed 4 symbols per byte (symbol i
+    /// at bits 2 (i % 4) of byte i / 4); valid only before finalize(), on bytes not set yet.
+    void set_packed(size_t first, const uint8_t *data, size_t count) {
+        const size_t per_block = BLOCK_SYMBOLS / 4, left = LEFT_SYMBOLS / 4;
+        while (count > 0) {
+            const size_t offset = first % per_block, n = std::min(count, per_block - offset);
+            uint8_t *block = blocks_[first / per_block].bytes;
+            const size_t in_left = offset < left ? std::min(n, left - offset) : 0;
+            if (in_left > 0) memcpy(block + offset, data, in_left);
+            if (n > in_left) memcpy(block + BYTES / 2 + (offset + in_left - left), data + in_left, n - in_left);
+            first += n;
+            data += n;
+            count -= n;
+        }
+    }
+
+    /// The bytes [first, first + count) of the sequence packed 4 symbols per byte.
+    void get_packed(size_t first, uint8_t *data, size_t count) const {
+        const size_t per_block = BLOCK_SYMBOLS / 4, left = LEFT_SYMBOLS / 4;
+        while (count > 0) {
+            const size_t offset = first % per_block, n = std::min(count, per_block - offset);
+            const uint8_t *block = blocks_[first / per_block].bytes;
+            const size_t in_left = offset < left ? std::min(n, left - offset) : 0;
+            if (in_left > 0) memcpy(data, block + offset, in_left);
+            if (n > in_left) memcpy(data + in_left, block + BYTES / 2 + (offset + in_left - left), n - in_left);
+            first += n;
+            data += n;
+            count -= n;
+        }
+    }
+
     /// Read what write_packed wrote, and compute the rank counts on the given threads.
     void read_packed(std::istream &in, unsigned threads = 1) {
         uint64_t size;
@@ -649,6 +680,18 @@ class quad_sequence {
         read_pod(in, block_bytes_);
         if (!valid_block_bytes(block_bytes_)) throw std::invalid_argument("unsupported size of the blocks of the BWT");
         visit([&](auto &ranks) { ranks.read(in); });
+    }
+
+    size_t size() const {
+        return visit([](const auto &ranks) { return ranks.size(); });
+    }
+
+    void set_packed(size_t first, const uint8_t *data, size_t count) {
+        visit([&](auto &ranks) { ranks.set_packed(first, data, count); });
+    }
+
+    void get_packed(size_t first, uint8_t *data, size_t count) const {
+        visit([&](const auto &ranks) { ranks.get_packed(first, data, count); });
     }
 
     /// The symbols alone (2 bits each), whose rank counts are computed when they are read.
@@ -1016,9 +1059,24 @@ class tunstall_bits {
     /// Build from the bits get(0), ..., get(size - 1).
     template <typename getter>
     void build(size_t size, getter get) {
-        size_ = size;
         size_t total_ones = 0;
         for (size_t i = 0; i < size; ++i) total_ones += get(i);
+        build_stream(size, total_ones, [&](auto sink) {
+            for (size_t i = 0; i < size; i += 64) {
+                const unsigned count = (unsigned)std::min<size_t>(64, size - i);
+                uint64_t word = 0;
+                for (unsigned t = 0; t < count; ++t) word |= (uint64_t)(bool)get(i + t) << t;
+                sink(word, count);
+            }
+        });
+    }
+
+    /// Build from [size] bits delivered in their order, [total_ones] of them set: pass(sink) calls
+    /// sink(word, count) for consecutive groups of count <= 64 bits (the first bit is the lowest one of the
+    /// word). The bits are passed twice and never held, so that a large vector can be built from a file.
+    template <typename pass_t>
+    void build_stream(size_t size, size_t total_ones, pass_t pass) {
+        size_ = size;
         make_code(size ? (double)total_ones / size : 0.5);
 
         // The parsing tree: a child is an inner node, or a leaf given as the negated codeword minus one.
@@ -1038,20 +1096,56 @@ class tunstall_bits {
                 }
             }
         }
+        // The parsing automaton by bytes: from an inner node, the codewords completed by the 8 bits of a byte
+        // (at most 8, 4 bits each) and the node reached.
+        struct step {
+            uint32_t codes;
+            uint8_t count;
+            uint8_t node;
+        };
+        std::vector<step> automaton(tree.size() * 256);
+        for (size_t node = 0; node < tree.size(); ++node) {
+            for (int byte = 0; byte < 256; ++byte) {
+                step s = {0, 0, 0};
+                int at = (int)node;
+                for (int t = 0; t < 8; ++t) {
+                    int next = tree[at][(byte >> t) & 1];
+                    if (next < 0) {
+                        s.codes |= (uint32_t)(-next - 1) << (4 * s.count++);
+                        at = 0;
+                    } else {
+                        at = next;
+                    }
+                }
+                s.node = (uint8_t)at;
+                automaton[node * 256 + byte] = s;
+            }
+        }
         // Parse the bits, followed by zeros until position [size] is covered and the last block is full.
         auto parse = [&](auto emit) {
-            size_t codes = 0, i = 0;
+            size_t codes = 0, fed = 0;
             int node = 0;
-            while (i <= size || node != 0 || codes % (2 * CODE_BYTES) != 0) {
-                int next = tree[node][i < size ? (int)get(i) : 0];
-                ++i;
+            auto feed = [&](int bit) {
+                int next = tree[node][bit];
                 if (next < 0) {
                     emit(codes++, -next - 1);
                     node = 0;
                 } else {
                     node = next;
                 }
-            }
+            };
+            pass([&](uint64_t word, unsigned count) {
+                unsigned t = 0;
+                for (; t + 8 <= count; t += 8) {
+                    const step &s = automaton[(size_t)node * 256 + ((word >> t) & 255)];
+                    uint32_t found = s.codes;
+                    for (unsigned c = 0; c < s.count; ++c, found >>= 4) emit(codes++, (int)(found & 15));
+                    node = s.node;
+                }
+                for (; t < count; ++t) feed((word >> t) & 1);
+                fed += count;
+            });
+            for (size_t i = fed; i <= size || node != 0 || codes % (2 * CODE_BYTES) != 0; ++i) feed(0);
             return codes;
         };
         size_t codes = parse([](size_t, int) {});

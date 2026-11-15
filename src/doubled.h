@@ -98,17 +98,19 @@ void set_mask(text &t, unsigned threads = 1) {
     t.mask = sdsl::bit_vector();
 }
 
-/// Whether the suffix of T at p starts with k - 1 characters of X or of Y.
-inline bool has_prefix(const text &t, uint64_t p) {
-    const uint64_t m = t.k - 1;
+/// Whether the suffix of T at p starts with m characters of X or of Y.
+inline bool has_prefix(const text &t, uint64_t p, uint64_t m) {
     return p + m <= t.n || (p > t.n && p + m <= 2 * t.n + 1);
 }
 
-/// Whether the suffixes of T at p and q start with the same k - 1 symbols (the mask bits ignored).
-inline bool same_prefix(const text &t, uint64_t p, uint64_t q) {
+/// Whether the suffix of T at p starts with k - 1 characters of X or of Y.
+inline bool has_prefix(const text &t, uint64_t p) { return has_prefix(t, p, t.k - 1); }
+
+/// Whether the suffixes of T at p and q start with the same m symbols (the mask bits ignored).
+inline bool same_prefix(const text &t, uint64_t p, uint64_t q, size_t m) {
     const uint64_t symbols = 0x0707070707070707ULL;
     const uint8_t *a = t.codes.data() + p, *b = t.codes.data() + q;
-    size_t m = t.k - 1, w = 0;
+    size_t w = 0;
     for (; w + 8 <= m; w += 8) {
         uint64_t x, y;
         memcpy(&x, a + w, 8);
@@ -122,12 +124,26 @@ inline bool same_prefix(const text &t, uint64_t p, uint64_t q) {
     return ((x ^ y) & symbols & ((1ULL << (8 * (m - w))) - 1)) == 0;
 }
 
+/// Whether the suffixes of T at p and q start with the same k - 1 symbols.
+inline bool same_prefix(const text &t, uint64_t p, uint64_t q) { return same_prefix(t, p, q, t.k - 1); }
+
+/// Whether the k-mer of T at p is its own reverse complement (the codes of complementary characters add up to 5).
+inline bool is_palindrome(const text &t, uint64_t p) {
+    const uint8_t *codes = t.codes.data() + p;
+    for (int j = 0; j < t.k / 2; ++j) {
+        if ((codes[j] & SYMBOL_BITS) + (codes[t.k - 1 - j] & SYMBOL_BITS) != 5) return false;
+    }
+    return t.k % 2 == 0;
+}
+
 /// The MBWT of T with all rows allocated and zero.
 mbwt empty_mbwt(const text &t, bool use_klcp) {
     mbwt m;
     m.bwt.assign(t.length() + 1, 0);
     m.sa_transformed_mask = sdsl::bit_vector(t.length() + 1, 0);
     if (use_klcp) m.klcp = sdsl::bit_vector(t.length() + 1, 0);
+    if (mbwt_with_same_kmer) m.same_kmer = sdsl::bit_vector(t.length() + 1, 0);
+    if (mbwt_with_same_kmer && t.k % 2 == 0) m.palindrome = sdsl::bit_vector(t.length() + 1, 0);
     return m;
 }
 
@@ -144,18 +160,22 @@ void write_rows(const text &t, mbwt &m, size_t row, const position_t *positions,
     byte *bwt = m.bwt.data();
     uint64_t *mask = m.sa_transformed_mask.data();
     uint64_t *klcp = m.klcp.size() > 0 ? m.klcp.data() : nullptr;
-    uint64_t mask_word = 0, klcp_word = 0;
+    uint64_t *same = m.same_kmer.size() > 0 ? m.same_kmer.data() : nullptr;
+    uint64_t *palindrome = m.palindrome.size() > 0 ? m.palindrome.data() : nullptr;
+    uint64_t mask_word = 0, klcp_word = 0, same_word = 0, palindrome_word = 0;
     size_t word = row >> 6;
     auto flush = [&]() {
         if (mask_word != 0) __atomic_fetch_or(mask + word, mask_word, __ATOMIC_RELAXED);
         if (klcp_word != 0) __atomic_fetch_or(klcp + word, klcp_word, __ATOMIC_RELAXED);
-        mask_word = klcp_word = 0;
+        if (same_word != 0) __atomic_fetch_or(same + word, same_word, __ATOMIC_RELAXED);
+        if (palindrome_word != 0) __atomic_fetch_or(palindrome + word, palindrome_word, __ATOMIC_RELAXED);
+        mask_word = klcp_word = same_word = palindrome_word = 0;
     };
     for (size_t x = 0; x < count; ++x) {
         if (x + ROW_PREFETCH < count) {
             uint64_t ahead = positions[x + ROW_PREFETCH];
             __builtin_prefetch(codes + ahead - (ahead > 0));
-            if (klcp != nullptr) __builtin_prefetch(codes + ahead + t.k - 2);
+            if (klcp != nullptr || same != nullptr) __builtin_prefetch(codes + ahead + t.k - 2);
         }
         size_t i = row + x;
         if ((i >> 6) != word) {
@@ -176,10 +196,14 @@ void write_rows(const text &t, mbwt &m, size_t row, const position_t *positions,
             bwt[i] = before - 1;
         }
         if (p < 2 * n + 1 && (codes[p] & MASK_BIT)) mask_word |= 1ULL << (i & 63);
-        if (klcp != nullptr) {
+        if (palindrome != nullptr && has_prefix(t, p, t.k) && is_palindrome(t, p)) palindrome_word |= 1ULL << (i & 63);
+        if (klcp != nullptr || same != nullptr) {
             uint64_t q = x + 1 < count ? (uint64_t)positions[x + 1] : next;
-            if (q != NONE && has_prefix(t, p) && has_prefix(t, q) && same_prefix(t, p, q)) {
+            if (klcp != nullptr && q != NONE && has_prefix(t, p) && has_prefix(t, q) && same_prefix(t, p, q)) {
                 klcp_word |= 1ULL << (i & 63);
+            }
+            if (same != nullptr && q != NONE && has_prefix(t, p, t.k) && has_prefix(t, q, t.k) && same_prefix(t, p, q, t.k)) {
+                same_word |= 1ULL << (i & 63);
             }
         }
     }

@@ -441,11 +441,28 @@ struct mbwt {
     std::vector<byte> bwt;
     sdsl::bit_vector sa_transformed_mask;
     sdsl::bit_vector klcp;
+    /// Optional, for finding out the type of the mask (mbwt_with_same_kmer): bit i is set iff the suffixes of
+    /// the rows i and i + 1 start with the same k-mer.
+    sdsl::bit_vector same_kmer;
+    /// With same_kmer, for a text of both strands and an even k: bit i is set iff the k-mer of row i is its own
+    /// reverse complement; its occurrences in the superstring then appear twice among the rows.
+    sdsl::bit_vector palindrome;
     size_t dollar_position = 0;
     /// The row of the second sentinel, if the text has two (the doubled text of FMSI 2 --fast), or NO_ROW.
     static constexpr size_t NO_ROW = ~(size_t)0;
     size_t dollar_position2 = NO_ROW;
 };
+
+/// Whether the constructions of the MBWT also fill mbwt::same_kmer (one more bit per row while constructing).
+inline bool mbwt_with_same_kmer = false;
+
+/// Whether two strings of k letters are the same, whatever their case.
+inline bool same_letters(const char *a, const char *b, size_t k) {
+    for (size_t t = 0; t < k; ++t) {
+        if ((a[t] ^ b[t]) & 0xDF) return false;
+    }
+    return true;
+}
 
 /// Suffix array of the superstring, including the empty suffix, by QSufSort (16 bytes per character).
 std::vector<qsint_t> suffix_array_qsufsort(const std::string &ms) {
@@ -507,6 +524,7 @@ mbwt mbwt_from_suffix_array(std::string &ms, const sa_t *sa, int k, bool use_klc
     }
 
     result.sa_transformed_mask = sdsl::bit_vector(ms.size() + 1);
+    if (mbwt_with_same_kmer) result.same_kmer = sdsl::bit_vector(ms.size() + 1, 0);
     result.bwt.resize(ms.size() + 1);
     // A chunk is a whole number of 64-bit words of the mask. The characters next to the suffixes
     // a few steps ahead are prefetched, as the suffixes start anywhere in the superstring.
@@ -514,9 +532,17 @@ mbwt mbwt_from_suffix_array(std::string &ms, const sa_t *sa, int k, bool use_klc
         const char *text = ms.data();
         byte *bwt = result.bwt.data();
         uint64_t *mask = result.sa_transformed_mask.data();
+        uint64_t *same = result.same_kmer.size() > 0 ? result.same_kmer.data() : nullptr;
+        const size_t n = ms.size(), length = (size_t)k;
         for (size_t i = begin; i < end; ++i) {
             if (i + PREFETCH_DISTANCE <= ms.size()) __builtin_prefetch(text + sa[i + PREFETCH_DISTANCE]);
             size_t sa_i = sa[i];
+            if (same != nullptr && i < n) {
+                const size_t next = sa[i + 1];
+                if (sa_i + length <= n && next + length <= n && same_letters(text + sa_i, text + next, length)) {
+                    same[i >> 6] |= 1ULL << (i & 63);
+                }
+            }
             if (sa_i == 0) {
                 result.dollar_position = i;
             } else {
