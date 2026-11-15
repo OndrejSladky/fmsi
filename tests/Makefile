@@ -1,4 +1,4 @@
-.PHONY: all clean test integration-test
+.PHONY: all clean test integration-test verification-test reference-test reference-test-quick
 
 CXX = g++
 CXXFLAGS= -g -Wall -Wno-unused-function -std=c++17 -O2
@@ -16,7 +16,7 @@ CXXFLAGS+= -DLIBSAIS_OPENMP
 endif
 
 
-all: test integration-test verification-test
+all: test integration-test verification-test reference-test-quick
 
 test: fmsi-test
 	./fmsi-test
@@ -30,6 +30,16 @@ verification-test: ./verify.py
 	python3 verify.py data/GCF_009858895.2_ASM985889v3_genomic.fna.ms.k13 --num_queries=100 --k=13 --streaming_length=50
 	python3 verify.py data/GCF_test2_ones.fna.ms.k31 --num_queries=100 --k=31 --streaming_length=60 --optimize=True
 	python3 verify.py data/GCF_009858895.2_ASM985889v3_genomic.fna.ms.k13 --k=13 --hashes=True
+
+# Every answer of FMSI 2 (and of the engine of FMSI 0.4) against an independent enumeration of canonical
+# k-mers, on small generated masked superstrings (reference_test.py): about four minutes, or half an hour in full.
+reference-test-quick: ./reference_test.py
+	$(MAKE) -C ..
+	./reference_test.py --quick --legacy
+
+reference-test: ./reference_test.py
+	$(MAKE) -C ..
+	./reference_test.py --legacy
 
 fmsi-test: $(wildcard *.cpp *.h *.hpp) gtest-all.o $(wildcard $(SRC)/*.cpp $(SRC)/*.h) $(SRC)/QSufSort.c $(LIBSAIS) $(OPENMP_SETTING)
 	$(CXX) $(CXXFLAGS) -I $(GTEST)/include $(INCLUDES) main.cpp $(SRC)/QSufSort.c $(LIBSAIS) gtest-all.o -pthread -o $@ $(LIBS) $(OPENMP_LIBS)

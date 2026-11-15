@@ -327,6 +327,13 @@ mask; the optional kLCP array takes 0.1–0.5 bits per character compressed and 
 
 To run the associated tests, simply run `make test`.
 
+`tests/reference_test.py` compares every answer of FMSI 2 with an independent reference that enumerates the
+canonical *k*-mers of small generated masked superstrings (min-one, max-one and other masks; repeated,
+masked-out and palindromic *k*-mers): membership, lookup and access in every preset, layout and way of
+querying (isolated and streamed, with and without the kLCP array, one query at a time and in batches, one
+thread and several), the compact file, and the engine of FMSI 0.4. `make -C tests reference-test-quick` takes
+about four minutes, `make -C tests reference-test` about forty.
+
 ## Issues
 
 Please use [GitHub issues](https://github.com/OndrejSladky/fmsi/issues).

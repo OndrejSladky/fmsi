@@ -640,6 +640,10 @@ int ms_index2(int argc, char *argv[]) {
   }
   // The rows that start with the same k-mer tell the type of the mask, or check the one that is stated.
   mbwt_with_same_kmer = true;
+  if (use_klcp && !fast && k < 2) {
+    std::cerr << "ERROR: The kLCP array (-l) of an index of one strand needs k >= 2." << std::endl;
+    return 1;
+  }
   if (use_klcp && !fast && k > 65) {
     std::cerr << "ERROR: The kLCP array (-l) of the --small index is available for k <= 65." << std::endl;
     return 1;
@@ -801,6 +805,12 @@ int ms_query2(int argc, char *argv[], bool output_orders) {
   if (output_orders && index.mask_type_name != "min-one" && index.mask_type_name != "min-one,max-one") {
     std::cerr << "Note: the mask of the index is " << (index.mask_type_name.empty() ? "of an unknown type" : index.mask_type_name)
               << ", not min-one: the hashes are unique but may not be minimal (a k-mer set more than once has several)." << std::endl;
+  } else if (output_orders && index.mask_type_source == "computed-one-strand") {
+    // An index of one strand cannot see a k-mer that is set once in each orientation.
+    std::cerr << "Note: the mask was found min-one on the indexed strand only, and its type was not stated. If it sets a k-mer "
+                 "once in each orientation, such a k-mer has two hashes and the hashes are not minimal (masks of KmerCamel "
+                 "never do). State the type when indexing (fmsi index -M min-one) or check it on both strands (fmsi index --fast)."
+              << std::endl;
   }
   if (k != 0 && k != (int)index.k) {
     std::cerr << "ERROR: Mismatch. Provided k (" << k << ") does not match the k of the index (" << index.k << ")." << std::endl;
@@ -1359,6 +1369,8 @@ int ms_info(int argc, char *argv[]) {
       const double characters = (meta.number("rows") - strands) / strands;
       std::cout << "superstring_characters\t" << (uint64_t)characters << std::endl;
       std::cout << "bits_per_superstring_character\t" << 8.0 * in.file_bytes() / characters << std::endl;
+      if (meta.get("mask_type_source") == "computed-one-strand")
+        std::cout << "mask_type_note\tcomputed on the indexed strand only: a k-mer set in both orientations is not seen" << std::endl;
       if (meta.get("mask_type").find("min-one") == 0) {
         std::cout << "kmers\t" << meta.number("mask_ones") / (uint64_t)strands << std::endl;
         std::cout << "bits_per_kmer\t" << 8.0 * in.file_bytes() * strands / meta.number("mask_ones") << std::endl;
