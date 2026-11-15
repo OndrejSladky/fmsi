@@ -14,4 +14,8 @@ if [ -n "$commit" ]; then
         version="$version-dirty"
     fi
 fi
-printf '#define VERSION "%s"' "$version" > version.h
+# Written only if it changed, so that the sources are compiled again only for another version.
+new="#define VERSION \"$version\""
+if [ ! -f version.h ] || [ "$(cat version.h)" != "$new" ]; then
+    printf '%s' "$new" > version.h
+fi

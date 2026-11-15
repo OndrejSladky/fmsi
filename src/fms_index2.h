@@ -796,7 +796,8 @@ inline void load_text_mask(index &ix, const file::reader &in, const description 
     if (sampled.encoding != ENCODING_SAMPLES || (d.strands == 2 ? 2 * characters + 2 : characters + 1) != d.rows) {
         throw std::invalid_argument("file " + in.path() + " stores its mask in a form that this version of FMSI does not know");
     }
-    const std::string runs = in.read_all(mask), stored = in.read_all(sampled);
+    // The runs and the samples are needed for the walks only: they are given back before the mask is packed.
+    std::string runs = in.read_all(mask), stored = in.read_all(sampled);
     text_samples samples;
     uint64_t count = 0;
     if (stored.size() < 16) throw std::invalid_argument("file " + in.path() + " is damaged");
@@ -805,15 +806,20 @@ inline void load_text_mask(index &ix, const file::reader &in, const description 
     if (count != (stored.size() - 16) / 8) throw std::invalid_argument("file " + in.path() + " is damaged");
     samples.rows.resize(count);
     memcpy(samples.rows.data(), stored.data() + 16, 8 * count);
+    std::string().swap(stored);
     for (uint64_t row : samples.rows) {
         if (row >= d.rows) throw std::invalid_argument("file " + in.path() + " is damaged");
     }
-    const run_mask along_text(reinterpret_cast<const uint8_t *>(runs.data()), runs.size(), characters, samples.step);
 
     auto permute = [&](auto set, auto prefetch) {
-        ix.bwt.with_ranks([&](const auto &ranks) {
-            permute_text_mask(ranks, ix.counts, ix.dollar_position, ix.dollar_position2, ix.strands, ix.k, along_text, samples, threads, set, prefetch);
-        });
+        {
+            const run_mask along_text(reinterpret_cast<const uint8_t *>(runs.data()), runs.size(), characters, samples.step);
+            ix.bwt.with_ranks([&](const auto &ranks) {
+                permute_text_mask(ranks, ix.counts, ix.dollar_position, ix.dollar_position2, ix.strands, ix.k, along_text, samples, threads, set, prefetch);
+            });
+        }
+        std::string().swap(runs);
+        std::vector<uint64_t>().swap(samples.rows);
     };
     if (ix.mask_type == mask_kind::plain) {
         ix.mask = bit_rank(d.rows);

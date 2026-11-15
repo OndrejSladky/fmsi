@@ -40,7 +40,11 @@ example: ../fmsi-example
 libsais/%.o: libsais/%.c libsais/libsais.h libsais/libsais64.h openmp.mk $(OPENMP_SETTING)
 	$(CC) $(CFLAGS) $(OPENMP_CFLAGS) -c $< -o $@
 
-version.h: version
+# The version holds the commit, so it is checked at every build (and written only if it changed).
+.PHONY: FORCE
+FORCE:
+
+version.h: version FORCE
 	./create-version.sh
 
 

@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "parallel.h"
+#include "rank2.h"
 
 namespace fmsi2 {
 
@@ -129,17 +130,19 @@ class run_mask {
 };
 
 /// Bits set from several threads and read in their order, in chunks that are given back once they are read, so
-/// that a structure built from the bits can replace them piece by piece.
+/// that a structure built from the bits can replace them piece by piece. A chunk has 2^23 bits (1 MiB), which
+/// aligned_array maps from the system and unmaps when it is given back: its memory then leaves the process
+/// (an allocator may keep freed memory).
 class chunked_bits {
-    static constexpr unsigned CHUNK_SHIFT = 21;
+    static constexpr unsigned CHUNK_SHIFT = 23;
     static constexpr size_t CHUNK_WORDS = (size_t)1 << (CHUNK_SHIFT - 6);
-    std::vector<std::unique_ptr<uint64_t[]>> chunks_;
+    std::vector<aligned_array<uint64_t>> chunks_;
     size_t size_ = 0;
 
   public:
     explicit chunked_bits(size_t size) : size_(size) {
         chunks_.resize((size >> CHUNK_SHIFT) + 1);
-        for (auto &chunk : chunks_) chunk.reset(new uint64_t[CHUNK_WORDS]());
+        for (auto &chunk : chunks_) chunk.resize(CHUNK_WORDS);
     }
 
     size_t size() const { return size_; }
@@ -156,7 +159,7 @@ class chunked_bits {
         for (size_t first = 0; first < size_; first += 64) {
             const size_t chunk = first >> CHUNK_SHIFT;
             sink(chunks_[chunk][(first >> 6) & (CHUNK_WORDS - 1)], (unsigned)std::min<size_t>(64, size_ - first));
-            if (release && (first + 64 >= size_ || ((first + 64) >> CHUNK_SHIFT) != chunk)) chunks_[chunk].reset();
+            if (release && (first + 64 >= size_ || ((first + 64) >> CHUNK_SHIFT) != chunk)) chunks_[chunk].resize(0);
         }
     }
 };
