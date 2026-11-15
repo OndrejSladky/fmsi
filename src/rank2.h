@@ -19,10 +19,24 @@
 #include <type_traits>
 #include <vector>
 
-// FMSI2_SCALAR selects the portable code also on ARM (for testing).
+// The rank of a block of 2-bit symbols and the decoding of a block of the packed mask come in three versions:
+// NEON (ARM), words and SSE (x86-64 with POPCNT and SSE4.1, i.e. x86-64-v2 and later; -march=native gives it),
+// and portable code. FMSI2_SCALAR selects the portable code everywhere (for testing); FMSI2_WORDS selects the
+// word-wise rank also on ARM (for testing it there).
 #if defined(__aarch64__) && !defined(FMSI2_SCALAR)
 #include <arm_neon.h>
 #define FMSI2_NEON 1
+#endif
+#if defined(__x86_64__) && defined(__POPCNT__) && defined(__SSE4_1__) && !defined(FMSI2_SCALAR)
+#include <immintrin.h>
+#define FMSI2_SSE 1
+#ifndef FMSI2_WORDS
+#define FMSI2_WORDS 1
+#endif
+#endif
+#if defined(FMSI2_WORDS) && defined(FMSI2_NEON)
+#undef FMSI2_NEON
+#define FMSI2_NEON_MASK 1
 #endif
 
 /// Forces the inlining of what the search loops call at every step: otherwise the compiler may call the rank of
@@ -96,6 +110,18 @@ inline uint64_t low_bits(int bits) {
     if (bits >= 64) return ~0ULL;
     if (bits <= 0) return 0ULL;
     return (1ULL << bits) - 1;
+}
+
+/// The low [bits] bits set, for bits in (-inf, +inf) clamped to [0, 64], without a branch.
+static inline __attribute__((always_inline)) uint64_t low_bits_branchless(int64_t bits) {
+    bits = bits < 0 ? 0 : bits;
+#if defined(__BMI2__) && defined(__x86_64__)
+    // BZHI keeps the word for 64 and more (a fast instruction also where PDEP and PEXT are not).
+    return _bzhi_u64(~0ULL, (unsigned)(bits > 64 ? 64 : bits));
+#else
+    const uint64_t below = (1ULL << (bits & 63)) - 1;
+    return bits >= 64 ? ~0ULL : below;
+#endif
 }
 
 /// The first x in [lo, hi) for which above(x) holds, or hi if there is none; above must be monotone
@@ -219,6 +245,28 @@ class quad_rank {
     /// (negative in the left half). Branch-free on purpose: the position in the block is unpredictable.
     static FMSI2_INLINE int64_t count_from_middle(const block_t &block, size_t r, uint8_t c) {
         const bool right = r >= LEFT_SYMBOLS;
+#ifdef FMSI2_WORDS
+        // The half as BYTES / 16 words of 32 symbols: the occurrences of c are counted in each word under a mask
+        // of the symbols between the position and the middle. In the left half these are the symbols from r to
+        // the counts (the last word of the half, which is left out); in the right half those before r. No branch
+        // depends on the position.
+        const uint8_t *half = block.bytes + (right ? BYTES / 2 : 0);
+        const uint64_t pairs = 0x5555555555555555ULL, pattern = pairs * (uint64_t)(c ^ 3);
+        // Number of bits of the half before the position.
+        const int64_t bit = (int64_t)(2 * (right ? r - LEFT_SYMBOLS : r));
+        const uint64_t flip = right ? 0 : ~0ULL;
+        int64_t sum = 0;
+        for (size_t w = 0; w < BYTES / 16; ++w) {
+            uint64_t word;
+            memcpy(&word, half + 8 * w, 8);
+            const uint64_t x = word ^ pattern;
+            const uint64_t before = low_bits_branchless(bit - (int64_t)(64 * w));
+            // The counts are in the last word of the left half.
+            const uint64_t symbols = (!right && w == BYTES / 16 - 1) ? 0 : pairs;
+            sum += __builtin_popcountll(x & (x >> 1) & symbols & (before ^ flip));
+        }
+        return right ? sum : -sum;
+#else
         // The half is scanned as BYTES / 2 bytes starting at [base]; in the left half, these include the
         // counts, which are never selected. The selected bytes are [first, first + selected) of them: from
         // the byte with symbol r to the middle (left), or from the middle to the byte with symbol r (right).
@@ -245,6 +293,7 @@ class quad_rank {
         uint8_t partial = matches(block.bytes[byte_of(r)], c) & ((1u << (2 * (r % 4))) - 1);
         int64_t before = (partial & 1) + ((partial >> 2) & 1) + ((partial >> 4) & 1);
         return right ? sum + before : before - sum;
+#endif
     }
 
   public:
@@ -963,7 +1012,7 @@ class tunstall_bits {
     template <bool counting>
     inline int decode(const tunstall_block &block, size_t offset, size_t &ones_before) const {
         uint8_t codes;
-#ifdef FMSI2_NEON
+#if defined(FMSI2_NEON) || defined(FMSI2_NEON_MASK)
         // Lengths of the two codewords of each byte, for the whole block at once; the counts have none.
         alignas(16) static const uint8_t SKIP_COUNTS[16] = {0, 0, 0, 0, 255, 255, 255, 255,
                                                             255, 255, 255, 255, 255, 255, 255, 255};
@@ -1009,6 +1058,64 @@ class tunstall_bits {
                                                  vmovn_u32(vcombine_u32(ones_sums[2], ones_sums[3])));
             ones_before = vaddvq_u16(vandq_u16(group_ones, passed)) +
                           vaddv_u8(vand_u8(vld1_u8(ones + 8 * group), skipped));
+        }
+#elif defined(FMSI2_SSE)
+        // As above with SSE: the lengths of the two codewords of each byte by a table lookup of the nibbles, the
+        // totals of the 8 groups of 8 bytes by sums of absolute differences.
+        const __m128i length_table = _mm_loadu_si128(reinterpret_cast<const __m128i *>(length_)),
+                      ones_table = _mm_loadu_si128(reinterpret_cast<const __m128i *>(ones_));
+        const __m128i nibble = _mm_set1_epi8(15), zero = _mm_setzero_si128();
+        // The counts (the first four bytes) have no codewords.
+        const __m128i skip_counts = _mm_setr_epi8(0, 0, 0, 0, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+        alignas(16) uint8_t lengths[64], ones[64];
+        alignas(16) uint16_t ends[8], ones_ends[8];
+        for (int v = 0; v < 4; ++v) {
+            const __m128i x = _mm_loadu_si128(reinterpret_cast<const __m128i *>(reinterpret_cast<const uint8_t *>(&block) + 16 * v));
+            const __m128i low = _mm_and_si128(x, nibble), high = _mm_and_si128(_mm_srli_epi16(x, 4), nibble);
+            __m128i sum = _mm_add_epi8(_mm_shuffle_epi8(length_table, low), _mm_shuffle_epi8(length_table, high));
+            if (v == 0) sum = _mm_and_si128(sum, skip_counts);
+            _mm_store_si128(reinterpret_cast<__m128i *>(lengths + 16 * v), sum);
+            const __m128i totals = _mm_sad_epu8(sum, zero);
+            ends[2 * v] = (uint16_t)_mm_cvtsi128_si32(totals);
+            ends[2 * v + 1] = (uint16_t)_mm_extract_epi16(totals, 4);
+            if (counting) {
+                sum = _mm_add_epi8(_mm_shuffle_epi8(ones_table, low), _mm_shuffle_epi8(ones_table, high));
+                if (v == 0) sum = _mm_and_si128(sum, skip_counts);
+                _mm_store_si128(reinterpret_cast<__m128i *>(ones + 16 * v), sum);
+                const __m128i ones_totals = _mm_sad_epu8(sum, zero);
+                ones_ends[2 * v] = (uint16_t)_mm_cvtsi128_si32(ones_totals);
+                ones_ends[2 * v + 1] = (uint16_t)_mm_extract_epi16(ones_totals, 4);
+            }
+        }
+        // The ends of the 8 groups (prefix sums); the group with the offset is the number of groups ending at
+        // or before it.
+        __m128i group_ends = _mm_load_si128(reinterpret_cast<const __m128i *>(ends));
+        group_ends = _mm_add_epi16(group_ends, _mm_slli_si128(group_ends, 2));
+        group_ends = _mm_add_epi16(group_ends, _mm_slli_si128(group_ends, 4));
+        group_ends = _mm_add_epi16(group_ends, _mm_slli_si128(group_ends, 8));
+        const __m128i target = _mm_set1_epi16((short)(uint16_t)std::min(offset, (size_t)0xFFFF));
+        // ends <= target, as unsigned numbers.
+        const __m128i passed = _mm_cmpeq_epi16(_mm_min_epu16(group_ends, target), group_ends);
+        const size_t group = (size_t)__builtin_popcount((unsigned)_mm_movemask_epi8(passed)) / 2;
+        if (group == 8) return -1;
+        _mm_store_si128(reinterpret_cast<__m128i *>(ends), group_ends);
+        if (group > 0) offset -= ends[group - 1];
+        // Likewise the byte within the group; a multiplication gives the prefix sums of its 8 lengths.
+        uint64_t group_lengths;
+        memcpy(&group_lengths, lengths + 8 * group, 8);
+        const uint64_t prefix = group_lengths * 0x0101010101010101ULL;
+        const __m128i prefixes = _mm_cvtsi64_si128((long long)prefix);
+        const __m128i byte_target = _mm_set1_epi8((char)(uint8_t)offset);
+        const unsigned skipped = (unsigned)_mm_movemask_epi8(_mm_cmpeq_epi8(_mm_min_epu8(prefixes, byte_target), prefixes)) & 0xFF;
+        const size_t byte = (size_t)__builtin_popcount(skipped);
+        if (byte > 0) offset -= (prefix >> (8 * (byte - 1))) & 0xFF;
+        codes = reinterpret_cast<const uint8_t *>(&block)[8 * group + byte];
+        if (counting) {
+            ones_before = 0;
+            for (size_t g = 0; g < group; ++g) ones_before += ones_ends[g];
+            uint64_t group_ones;
+            memcpy(&group_ones, ones + 8 * group, 8);
+            if (byte > 0) ones_before += ((group_ones * 0x0101010101010101ULL) >> (8 * (byte - 1))) & 0xFF;
         }
 #else
         size_t byte = 0;
