@@ -7,30 +7,47 @@
 
 * [Introduction](#introduction)
 * [Installation](#installation)
+* [Quick start](#quick-start)
 * [Usage](#usage)
-   * [k-mer queries (stable)](#k-mer-queries-stable)
-   * [k-mer set operations (experimental)](#k-mer-set-operations-experimental)
-      * [Basic: k-mer set operations managed by FMSI](#basic-k-mer-set-operations-managed-by-fmsi)
-      * [Advanced: externally managed k-mer set operations](#advanced-externally-managed-k-mer-set-operations)
-* [Commands overview](#commands-overview)
+   * [Membership and dictionary queries](#membership-and-dictionary-queries)
+   * [Presets](#presets)
+   * [Streamed queries and the kLCP array](#streamed-queries-and-the-klcp-array)
+   * [Threads](#threads)
+   * [The type of the mask: min-one and max-one](#the-type-of-the-mask-min-one-and-max-one)
+   * [The index file](#the-index-file)
+   * [Commands overview](#commands-overview)
+* [C++ API](#c-api)
+* [FMSI 0.4: legacy commands and set operations](#fmsi-04-legacy-commands-and-set-operations)
 * [How it works?](#how-it-works)
 * [Testing](#testing)
 * [Issues](#issues)
 * [Changelog](#changelog)
 * [Licence](#licence)
+* [Citation](#citation)
 * [Contact](#contact)
 
 <!-- vim-markdown-toc -->
 
 ## Introduction
 
-FMSI is a highly memory-efficient tool for performing membership queries on single $k$-mer sets.
-FMSI uses [masked superstrings](https://doi.org/10.1101/2024.03.06.583483) for storing the $k$-mer sets to ensure high compressibility for a wide range of different $k$-mer sets,
-and implements FMS-index, a simplification of the FM-index. It supports both streaming and single queries. The functionality implemented in FMSI is based on the following papers:
+FMSI is a memory-efficient index of *k*-mer sets. It represents a set by a
+[masked superstring](https://doi.org/10.1101/2023.02.01.526717) (a superstring of the *k*-mers with a mask that tells
+which of its *k*-mers are in the set, computed e.g. by [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel)) and
+indexes it by its masked Burrows–Wheeler transform, an FM-index without a sampled suffix array. Masked superstrings
+stay compact for any *k*-mer set, also for subsampled sets and sequencing data, whose de Bruijn graphs are fragmented.
 
-The memory consumption for FMSI are (w/o kLCP which is additional 1bit/superstring char):
-- Queries: 2.41 bits / canonical 31-mer with human genome; ~3 bits / canonical 31-mer for _E. coli_ pangenome (1.17G k-mers from 89k genome); ~7 bits / canonical 31-mer for _SARS-CoV-2_
-- Construction: 46 GB for human genome
+**FMSI 2** is the same index with a new engine: rank structures that read one cache line, searches of many *k*-mers
+in lockstep with prefetching, streaming without an additional array, threads for queries and construction, and
+one index file. It answers the queries of FMSI with the same results, one to two orders of magnitude faster:
+
+- **membership queries**: is a *k*-mer in the set? (`fmsi query`)
+- **dictionary queries**: the hash of a *k*-mer, a minimal perfect hash of the set (`fmsi lookup`), and the *k*-mer of
+  a hash (`fmsi access`)
+
+An index takes 2 bits per character of the superstring plus its mask, i.e. typically 2.3–6 bits per *k*-mer on
+disk (1.0–2.1 characters per *k*-mer, depending on the set), and about as much in memory in its most compact layout.
+
+The methods are described in:
 
 [1] Ondřej Sladký, Pavel Veselý, and Karel Břinda: FroM Superstring to Indexing: a space-efficient index for unconstrained *k*-mer sets using the Masked Burrows-Wheeler Transform (MBWT).
 *bioRxiv* 2024.10.30.621029; [doi: 10.1101/2024.10.30.621029](https://doi.org/10.1101/2024.10.30.621029).
@@ -43,149 +60,199 @@ The memory consumption for FMSI are (w/o kLCP which is additional 1bit/superstri
 
 ![image](docs/fig1.svg)
 
-To construct an index (the `fmsi index` subcommand), FMSI accepts as input (see the `-p` parameter) a masked superstring of the $k$-mer set.
-The masked superstring can be computed by [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel).
-It then stores the index file in files with the same prefix and the `.fmsi.[component]` extension.
-There are these components:
-- `.ac_gt`, `.ac` and `.gt` for storing the nodes of the wavelet tree of BWT
-- `.mask` for storing the RRR-compressed SA-transformed mask
-- `.klcp` for storing the kLCP array (optional)
-- `.misc` for storing counts, dollar position and k
-
-To query the index (the `fmsi query` subcommand), FMSI accepts a text file with $k$-mers on separate lines to query (see the `-q` parameter).
-In a very near future, we will however update this to accept a FASTA file and allow for streaming queries.
-
-
-Additionally, FMSI experimentally supports set operations using the $f$-masked superstrings framework.
-However, this feature is currently only experimental and requires rather significant time and memory.
-
-
-
 ## Installation
 
-**Prerequisities:**
+**Prerequisites:** a C++17 compiler (GCC or clang), zlib, CMake (for the bundled sdsl-lite). OpenMP is optional:
+with it, the suffix array is constructed on several threads.
 
-- GCC 4.8+ or equivalent
-- Zlib
-
-**Installation:**
-FMSI can be installed using [bioconda](https://bioconda.github.io/):
-```
-conda install bioconda::fmsi
-```
-
-Alternatively, FMSI can be built directly from source:
 ```
 git clone --recursive https://github.com/OndrejSladky/fmsi
 cd fmsi && make -j
 export PATH="$PATH:$(pwd)"
 ```
 
+FMSI 0.4 is on [bioconda](https://bioconda.github.io/) (`conda install bioconda::fmsi`); FMSI 2 is not released there yet.
+
+Notes on compiling:
+
+- The code is compiled with `-march=native` (`make ARCH=...` changes it). The fast code paths need NEON on ARM
+  (always there) or POPCNT and SSE4.1 on x86-64 (`ARCH=x86-64-v2` or later; BMI2 is used if available); other targets
+  run portable code, which is correct but slower.
+- OpenMP: GCC and LLVM clang take `-fopenmp` as they are. Apple clang has no OpenMP runtime: install the one of
+  Homebrew (`brew install libomp`), which `make` then finds, or compile everything with the GCC of Homebrew
+  (`make CC=gcc-16 CXX=g++-16` from a clean checkout). `make OPENMP=0` switches OpenMP off; `make` prints which it is.
+
+## Quick start
+
+```
+# 1. A masked superstring of the 31-mers of your sequences, by KmerCamel
+kmercamel compute -k 31 -o ms.fa yourfile.fa
+
+# 2. The index: one file, ms.fa.fmsi
+fmsi index ms.fa
+
+# 3. Queries: for every sequence of queries.fa, a line with its name and one 0/1 per k-mer
+fmsi query -q queries.fa ms.fa.fmsi
+
+# The same for reads, streamed and on 8 threads
+fmsi query -S -t 8 -q reads.fq.gz ms.fa.fmsi
+
+# The hashes of the k-mers (a minimal perfect hash; -1 for a k-mer that is not in the set), and back
+fmsi lookup -q queries.fa ms.fa.fmsi
+fmsi access -q hashes.txt ms.fa.fmsi
+
+# What the index file holds
+fmsi info ms.fa.fmsi
+```
+
 ## Usage
 
-### k-mer membership queries (stable)
+### Membership and dictionary queries
 
-1. Compute an optimized masked superstring for all k-mers from a given FASTA file by [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel).
-   ```
-   kmercamel compute -k 31 -o /dev/null -M ms.fa yourfile.fa
-   ```
+`fmsi query [-S] [-t INT] -q <queries> <index.fmsi>` answers **membership** queries. The queries are FASTA or FASTQ,
+possibly gzipped (`-` or no `-q`: standard input). For each sequence, FMSI prints its name, a tabulator, and one
+character per *k*-mer of the sequence: `1` if the *k*-mer is in the set, `0` if not. A *k*-mer and its reverse
+complement are the same *k*-mer. *K*-mers with characters other than ACGT are not in the set.
 
-2. Create an FMS index from the masked superstring:
-   ```
-   fmsi index -k 31 ms.fa
-   ```
+`fmsi lookup` answers **dictionary** queries with the same options: instead of `0`/`1` it prints the comma-separated
+hashes of the *k*-mers, `-1` for a *k*-mer that is not in the set. With a min-one mask (the default of KmerCamel; see
+[below](#the-type-of-the-mask-min-one-and-max-one)) the hashes are a minimal perfect hash: the *k*-mers of the set get the
+numbers 0 to *N* − 1. `fmsi access -q <hashes> <index.fmsi>` is the inverse: for each hash (one per line) it prints
+the *k*-mer, as it occurs in the superstring (the looked-up *k*-mer or its reverse complement), and `-` for a value
+that is not a hash.
 
-3. Query the index from a given query FASTA file with k-mers:
-   ```
-   fmsi query -O -q query.fa -k 31 ms.fa
-   ```
+*K*-mers are searched 32 at a time, each step of a search prefetching the memory of the next one (`-b INT` changes
+the number; `-b 1` searches one at a time and is several times slower on a large index).
 
-Note that the path for FMSI (i.e., `ms.fa`) needs to be the last argument.
+### Presets
 
-#### Output format
+`fmsi index` has three presets. The index file holds the BWT and the mask in a compact form of its own; the layout
+in memory is built when the index is loaded, so `--extra-small` and `--small` write the same index and differ only
+in the layout that the file recommends, which `fmsi query --extra-small` and `--small` override at any time.
 
-For each line of queries, FMSI outputs an identifier and one bitstring, where 1 corresponds to a present *k*-mer and 0 corresponds to not present *k*-mer.
-Invalid *k*-mers, i.e., those that contain non-ACGT characters are also indicated with 0s.
+| preset | indexed | layout in memory | when |
+|---|---|---|---|
+| `--extra-small` | the masked superstring | the most compact: BWT in blocks of 256 bytes, Tunstall-coded mask | memory first: about the memory of FMSI 0.4; queries about 1.5 times slower than `--small` |
+| `--small` (default) | the masked superstring | the fastest: BWT in blocks of 64 bytes (one cache line per rank), plain mask | the default: about a sixth more memory than `--extra-small` |
+| `--fast` | the masked superstring and its reverse complement | the fastest | speed first: twice the size; a *k*-mer is searched as it is only, never as its reverse complement, which about halves the query time |
 
-#### Specific-case usage
+The options `-c INT` (bytes per block of the BWT: 64, 128 or 256) and `-m STR` (mask: `plain`, `packed`, `rrr`) of
+`fmsi index` and `fmsi query` choose a layout in between.
 
-If you need support for streaming queries, use the `-S` for speed enhancements at the cost of additional bit per superstring character.
+In an index of both strands (`--fast`), the hashes are those of the *k*-mers as they are: a *k*-mer and its reverse
+complement have different hashes, in the range 0 to 2*N* − 1.
 
-If your mask superstring does not maximizes the number of ones in the mask, omit the `-O` optimization flag for query as otherwise you might get incorrect results.
-We, however, recommend to optimize the mask using `kmercamel optimize`.
+### Streamed queries and the kLCP array
 
-### k-mer lookup queries (stable)
+With `-S`, the *k*-mers of a sequence are streamed: the search of a *k*-mer continues that of its neighbour instead
+of starting anew. Use it for reads and longer sequences. It needs nothing beyond the index: the match of a *k*-mer is
+extended by the next character and may grow longer than *k*; when it cannot be extended, the *k*-mers that contain
+the missing substring are known to be absent and are skipped.
 
-1. Compute a default masked superstring for all k-mers from a given FASTA file by [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel).
-   ```
-   kmercamel compute -k 31 -o ms.fa yourfile.fa
-   ```
+`fmsi index -l` also writes the kLCP array (`<index file>.klcp`), which `-S` then uses (`-L` ignores it). With it,
+a match is cut back to *k* − 1 characters before it is extended, so consecutive *k*-mers of a query need not be
+consecutive in the superstring. This pays off where reads rarely follow the superstring, e.g. RNA-seq reads on a
+transcriptome index; elsewhere streaming without it is about as fast.
 
-2. Create an FMS index from the masked superstring:
-   ```
-   fmsi index -k 31 ms.fa
-   ```
+### Threads
 
-3. Query the index from a given query FASTA file with k-mers:
-   ```
-   fmsi lookup -q query.fa -k 31 ms.fa
-   ```
+`fmsi query -t INT` searches on several threads, as the pipeline of minimap2 does: one thread reads the query file
+and cuts it into blocks of whole sequences, the searching threads parse and search the blocks, and one thread prints
+the results in the order of the input. A sequence is never split, so a long one is searched by one thread.
 
-#### Output format
+`fmsi index -t INT` constructs the index on several threads (the suffix array by
+[libsais](https://github.com/IlyaGrebnov/libsais), if FMSI is compiled with OpenMP). The index file does not depend
+on the number of threads. Construction takes about 5–11 bytes of memory per character of the indexed text
+(9 or more beyond 2³¹ characters, where the suffix array has 64-bit integers); `--lean` with `--fast` merges the
+suffix arrays of the two strands instead of constructing that of both, which takes less memory and gives the same index.
 
-For each line of lookup queries, FMSI outputs an identifier and a comma-separated list of unique integer for each present k-mer between 0 and number of k-mers - 1.
-K-mers that are not present in the index are marked with -1.
+### The type of the mask: min-one and max-one
 
+A *k*-mer may occur several times in a superstring, and its mask may set one or more of its occurrences:
 
-### FMSI 2 prototype (experimental)
+- a **min-one** mask sets exactly one occurrence of each *k*-mer of the set. Then the number of set bits before the
+  occurrence is a minimal perfect hash of the set, which is what `fmsi lookup` returns. KmerCamel writes min-one masks
+  by default.
+- a **max-one** mask sets all occurrences of the *k*-mers of the set. FMSI 0.4 answers membership queries the fastest
+  on such a mask (`-O`: the first bit of the suffix-array interval of a *k*-mer decides).
 
-The commands `index2`, `query2` and `lookup2` are a prototype of a faster index over the same masked Burrows-Wheeler transform.
-They do not replace the stable commands yet and use their own index file (`<prefix>.fmsi2`).
+FMSI 2 tests any mask in constant time, so **one index of a min-one masked superstring serves both membership and
+dictionary queries**; `-O` is accepted and ignored. With a mask that is not min-one, `fmsi lookup` still returns
+unique hashes, but a *k*-mer set several times has several and the hashes exceed the number of *k*-mers; `fmsi lookup`
+says so.
 
+The index file records the type of its mask (`fmsi info`: `mask_type`, `mask_type_source`): as stated with
+`fmsi index -M min-one|max-one`, or in the FASTA header of the masked superstring (`mask=min-one`, as KmerCamel
+writes), or as computed during construction. A stated type is checked against the computed one and replaced, with a
+warning, if the mask contradicts it. The computation is exact for an index of both strands; for one strand it cannot
+relate a *k*-mer to its reverse complement (a mask that sets a *k*-mer once in each orientation looks min-one), which
+masks of KmerCamel in its bidirectional mode never do.
+
+### The index file
+
+An index is one file, `<name>.fmsi` (default name: that of the masked superstring with `.fmsi` added), and
+optionally its kLCP array, `<name>.fmsi.klcp`. `fmsi info <name>.fmsi` prints what it holds: *k*, the number of
+strands, the preset, the type of the mask, the recommended layout, the FASTA header of the masked superstring, and the
+sections of the file with their sizes; `--check` verifies their checksums.
+
+The file is a container of tagged sections with their table at its end (described in `src/index_file.h`): `META`
+(text, `key=value` per line), `BWT` (2 bits per character) and `MASK` (compressed). A reader skips sections that it
+does not know unless they are marked as required, so later versions can add data without breaking the files that
+exist. The rank structures, the table of the first search steps and the hints of select are not stored: they are
+built when the file is loaded, in the layout asked for, which takes about a second per 500 million characters.
+
+Indexes of the prototype of FMSI 2 (`<prefix>.fmsi2`) are still read; `fmsi convert` rewrites them. Indexes of
+FMSI 0.4 (several files `<prefix>.fmsi.*`) are read by `fmsi legacy` only; index the masked superstring again.
+
+### Commands overview
+
+| command | |
+|---|---|
+| `fmsi index [--extra-small\|--small\|--fast] [-l] [-t INT] [-o FILE] <masked superstring>` | index a masked superstring |
+| `fmsi query [-S] [-t INT] -q <queries> <index.fmsi>` | membership queries |
+| `fmsi lookup [-S] [-t INT] -q <queries> <index.fmsi>` | dictionary queries: hashes of *k*-mers |
+| `fmsi access -q <hashes> <index.fmsi>` | dictionary queries: *k*-mers of hashes |
+| `fmsi info [--check] <index.fmsi>` | what an index file holds |
+| `fmsi convert <index>` | rewrite an index of an older format |
+| `fmsi legacy <command>` | the commands of FMSI 0.4 |
+
+Each command prints its options with `-h`. The index is the last argument.
+
+## C++ API
+
+`src/fmsi_api.h` is the supported way to use FMSI 2 from another program; `src/example.cpp` is a complete example
+(`make -C src example`).
+
+```cpp
+#include "fmsi_api.h"
+
+fmsi::Index index = fmsi::Index::load("ms.fa.fmsi");
+
+// Membership
+bool present = index.contains(kmer);                            // one k-mer
+std::vector<uint8_t> hits = index.contains_all(read);           // every k-mer of a sequence, streamed
+index.contains_batch(kmers, count, out);                        // many k-mers, searched in lockstep
+
+// Dictionary
+int64_t hash = index.lookup(kmer);                              // -1 if the k-mer is not in the set
+std::vector<int64_t> hashes = index.lookup_all(read);
+std::string back = index.access(hash);                          // the inverse of lookup
+
+// An index can also be built in memory from a masked superstring, and saved
+fmsi::Index built = fmsi::Index::build(masked_superstring, 31);
+built.save("kmers.fmsi");
 ```
-./fmsi index2 ms.fa                           # preset --small (the default): the superstring alone
-./fmsi index2 --fast ms.fa                    # preset --fast: also its reverse complement, twice the space
-./fmsi index2 --fast --lean ms.fa             # the same index with half the memory of the construction
-./fmsi index2 -m packed -c 128 ms.fa          # smaller and somewhat slower
-./fmsi query2 -q queries.fa ms.fa             # membership of each k-mer, as `fmsi query`
-./fmsi lookup2 -q queries.fa ms.fa            # hashes of the k-mers, as `fmsi lookup`
-./fmsi access2 -q hashes.txt ms.fa            # the k-mers of hashes, the inverse of lookup2
-./fmsi query2 -S -t 8 -q reads.fa ms.fa       # streamed queries on 8 threads
-./fmsi index2 -l ms.fa                        # with the kLCP array, for faster streamed queries
-./fmsi index2 -t 8 ms.fa                      # construction on 8 threads
-```
 
-Presets of `index2`:
+The query methods are const and can be called from several threads. The methods for many *k*-mers are several times
+faster per *k*-mer than those for one. Everything else in the sources is internal and may change.
 
-- `--small` (the default) indexes the masked superstring X alone, with the plain mask and BWT blocks of 64 bytes. A k-mer is searched as it is and, if it is not found, as its reverse complement; a saturating counter predicts which strand to try first.
-- `--fast` indexes X, a separator and the reverse complement of X, so that every k-mer occurs in both orientations and is searched as it is only, on one strand, by lookups and by streaming. It takes twice the space (and `-l` twice the kLCP array). The separator sorts before the characters and after the end of the text, so the suffix array is the generalized one of the two strings and no k-mer spans them; the mask of the reverse complement is that of X reversed (its k-mer at j is the reverse complement of the one of X at n - j - k). Hashes are those of the k-mers as they are: a k-mer and its reverse complement have different hashes, in [0, 2N) for N k-mers and a mask with the minimum number of ones, and `access2` returns the k-mer as it is. Lookups of k <= 32 run in a loop of their own, and the default `-p` of `query2` is larger (11 or 12 for large indexes, at most half a bit per row).
-- `--lean` (with `--fast`) constructs the suffix arrays of X and of its reverse complement one after the other, with 32-bit integers up to 2^31 characters of X, keeps them in temporary files, and merges them: the suffixes of the reverse complement are inserted among those of X by backward search on the BWT of X, in chains that run in parallel from anchors found by binary search (each chain must end at the next anchor). The index is the same as without `--lean`, with about half the memory and no 64-bit suffix array beyond 2^30 characters of X.
-- `-m`, `-c` and `-l` change what the presets set.
+## FMSI 0.4: legacy commands and set operations
 
-The differences from the stable index:
-
-- The BWT is stored as 2-bit characters in blocks of `-c` 64, 128 or 256 bytes (2.29, 2.14 and 2.07 bits per superstring character) with the rank counts in the middle of the block. A rank scans at most half of a block and reads one cache line of a 64-byte block (1.5 and 2 lines on average for the larger ones), instead of a wavelet tree over three bitvectors.
-- The mask has three encodings. `-m plain` is a bitvector with in-line rank counts (1.03 bits per character, the fastest). `-m packed` compresses it by a Tunstall code chosen for its density, 16 strings coded by 4 bits each, decoded within one cache line (0.87 bits per character for a mask with 77% of ones). `-m rrr` is the RRR vector of the stable index (0.83 bits per character, several times slower).
-- `-b INT` k-mers (or sequences with `-S`) are searched at the same time, each step prefetching the cache lines of the next one.
-- The SA intervals of all strings of length `-p INT` are tabulated when the index is loaded.
-- `-S` streams without a kLCP array: the match of a k-mer is extended to the next k-mer and may get longer than k; when it cannot be extended, the k-mers containing the missing substring are skipped.
-- `index2 -l` adds the kLCP array (`<prefix>.fmsi2.klcp`, 1 bit per character), which `query2 -S` and `lookup2 -S` use if present (`-L` ignores it). The match then stays a k-mer, so consecutive k-mers of a query need not be consecutive in the superstring. This pays off where reads rarely follow the superstring, e.g., on transcriptomes.
-- `-t INT` threads search the queries. As in the pipeline of minimap2, one more thread reads the query file and cuts it into blocks of whole sequences of `-B` bytes (1 MB), the searching threads take the blocks as they become free, and one more thread prints the results in the order of the input. The work is thus split by the size of the input, not by the number of sequences; a sequence is never split, so a long one is searched by one thread. With `-t 1`, everything runs on one thread.
-- For FASTA, the reading thread only cuts the file before a line starting with `>`, and the searching threads parse their blocks themselves, so parsing scales with the threads too (this matters for files with one k-mer per record). FASTQ is parsed by the reading thread with kseq, as a quality line may start with `>` or `@`; the results are those of kseq in both cases.
-- `index2 -t INT` constructs the index on several threads; the index files do not depend on their number. The suffix array is constructed on several threads only if FMSI is compiled with OpenMP (see below).
-- A k-mer is represented if the k-mer or its reverse complement has a set occurrence (the `or` semantics), so the same index answers membership queries for any mask and lookup queries for masks with the minimum number of ones. The `-O` and `-f` options are not available.
-- K-mers with invalid characters are reported as absent, one value per k-mer of the sequence.
-- `access2` prints the k-mer of every hash (one integer per line of `-q`), as it occurs in the superstring, so it is the looked-up k-mer or its reverse complement; a value that is not a hash gives a line with `-`. It inverts `lookup2` for masks with the minimum number of ones. The occurrence is found by a select on the mask and each character by a select on the BWT; `-b INT` k-mers are retrieved at the same time, with the hints and the blocks of every select prefetched. The select hints (1/16 bit per character) are built when the command starts and are not stored; the packed and RRR masks are searched by rank and are slower.
-
-Suffix arrays are constructed by [libsais](https://github.com/IlyaGrebnov/libsais) (also in `fmsi index`; `-Q` selects the original QSufSort).
-
-OpenMP is used by libsais only; all other threads are `std::thread`. `make` prints whether it is on:
-
-- GCC and LLVM clang (Linux, conda) take `-fopenmp` as they are.
-- Apple clang has no OpenMP runtime: install the one of Homebrew (`brew install libomp`), which `make` then finds, or compile everything with the GCC of Homebrew (`make CC=gcc-16 CXX=g++-16`; start from a clean checkout, as the bundled sdsl-lite must be compiled by the same compiler).
-- `make OPENMP=0` switches OpenMP off; only the suffix array is then constructed on one thread.
-
-### k-mer set operations (experimental)
+The commands of FMSI 0.4 are available as `fmsi legacy <command>` (`index`, `query`, `lookup`, `export`, and the
+experimental set operations `union`, `inter`, `diff`, `symdiff`, `merge`, `compact`), with their options (`-O`, `-f`)
+and their index of several files (`<prefix>.fmsi.*`). They are kept for the set operations in the framework of
+[function-assigned masked superstrings](https://doi.org/10.1101/2024.03.06.583483), which FMSI 2 does not implement
+yet, and for comparisons.
 
 #### Basic: k-mer set operations managed by FMSI
 
@@ -198,14 +265,14 @@ This can be done in a few simple steps:
 1. **Compute a masked superstring.**
    - This can be done by [KmerCamel🐫](https://github.com/OndrejSladky/kmercamel); simply run `kmercamel -c -k 31 -p fasta.fa -o ms.fa` (with appropriate values for `-k` and `-p`).
    - If you obtained the masked superstring in a different way, make sure it minimizes the number of ones; if you're unsure, you can use `kmercamel optimize -c -a zeros -k 31 -p ms_more_ones.fa -o ms.fa`. No need to optimize superstrings directly computed by KmerCamel🐫.
-2. **Index the masked superstring** with `fmsi index ms.fa`.
-3. **Perform the set operations** you wish with `fmsi [operation] -k 31 -p ms1.fa -p ms2.fa -r ms.fa`. Possible operations (use the names instead of `[operation]`) are:
+2. **Index the masked superstring** with `fmsi legacy index ms.fa`.
+3. **Perform the set operations** you wish with `fmsi legacy [operation] -k 31 -p ms1.fa -p ms2.fa -r ms.fa`. Possible operations (use the names instead of `[operation]`) are:
    - `union` to compute the union.
    - `inter` to compute the intersection
    - `diff` to compute the set difference
    - `symdiff` to compute the symmetric difference
-4. **Query the index** with `fmsi query -q query.fa -k 31 ms.fa`.
-5. To **get back the underlying masked superstring**, use `fmsi export ms.fa`.
+4. **Query the index** with `fmsi legacy query -q query.fa -k 31 ms.fa`.
+5. To **get back the underlying masked superstring**, use `fmsi legacy export ms.fa`.
 
 If you use FMSI this way, it ensures that operations in any order and queries to any index are computed correctly,
 while keeping the memory usage for queries as low as possible. Furthermore, exported $f$-masked superstrings are always,
@@ -218,52 +285,34 @@ you probably want to stick to the advanced usage, managing the functions and bui
 #### Advanced: externally managed k-mer set operations
 
 If you wish to manage the operations yourself, the workflow is quite similar to the basic usage, with the following changes:
-- Underlying $f$-MS concatenation can be done with `fmsi merge`. Details on which $f$ should be used is described in Chapter 4 of the [paper](https://doi.org/10.1101/2024.03.06.583483).
-- Compaction and change back to the or-masked superstring can be done with `fmsi compact`.
+- Underlying $f$-MS concatenation can be done with `fmsi legacy merge`. Details on which $f$ should be used is described in Chapter 4 of the [paper](https://doi.org/10.1101/2024.03.06.583483).
+- Compaction and change back to the or-masked superstring can be done with `fmsi legacy compact`.
 - If you query the index with different function than or, use the `-f` argument. The same applies to compaction.
 
-## Commands overview
-
-To run the tool, run `fmsi [command]`
-
-The recognized commands are:
-
-- `index` Creates a BWT based index of the given masked superstring.
-- `query` Queries a $k$-mer against an index.
-- `export` Export the underlying masked superstring.
-- `index2`, `query2`, `lookup2` Prototype of a faster index (see above).
-- `union` Performs union on two indexes. Expects or-MS.
-- `inter` Performs intersection on two indexes. Expects or-MS.
-- `diff`  Performs set difference on two indexes. Expects or-MS.
-- `symdiff` Performs symmetric difference on two indexes. Expects or-MS.
-- `merge` Merge several indexes.
-- `compact` Compacts an index.
-
-
-
-Each command has its own set of arguments, which can be displayed by running `fmsi [command] -h`.
 
 ## How it works?
 
-FMSI builds on the representation of *k*-mer sets via [masked superstrings](https://doi.org/10.1101/2024.03.06.583483),
-which ensures a generally compact representation of *k*-mers, requiring typically 1-1.4 characters per *k*-mer for genomes and pan-genomes.
+FMSI builds on the representation of *k*-mer sets via [masked superstrings](https://doi.org/10.1101/2023.02.01.526717),
+which is compact for any *k*-mer set: typically 1–1.4 characters per *k*-mer for genomes and pan-genomes, about 2 for
+sequencing data.
 
-FMSI then builds a simplified FM-index, which omits the sampled suffix array, which is the key to the memory efficiency.
-It instead computes the SA-transformed mask, which makes it possible to determine the presence of a *k*-mer
-without the need to compute the original coordinates.
+FMSI indexes the superstring by its Burrows–Wheeler transform without a sampled suffix array, which is the key to its
+memory efficiency. Instead, the mask is stored in the order of the suffix array (the SA-transformed mask), so that the
+presence of a *k*-mer follows from its suffix-array interval without its coordinates in the superstring.
 
-Additionally, FMSI optionally constructs the kLCP array (a binary version of the truncated LCP array) 
-to allow *O(1)* time for a *k*-mer in streaming queries.
+FMSI 2 keeps this index and changes how it is laid out and searched:
 
+- the BWT is stored as 2-bit characters in blocks of 64 bytes with the rank counts in the middle of each block, so
+  that a rank reads one cache line (2.29 bits per character; blocks of 128 or 256 bytes take 2.14 or 2.07);
+- the mask is a bit vector with in-line counts (1.03 bits per character) or is compressed by a Tunstall code decoded
+  within a cache line (0.3–0.9 bits);
+- searches run in lockstep, each step prefetching the cache line of its next step, and start from a table of the
+  suffix-array intervals of all short strings;
+- a *k*-mer is in the set if its interval has a set mask bit, which is tested in constant time for any mask;
+- streaming extends the match of a *k*-mer instead of searching the next one anew, with or without the kLCP array.
 
-The memory consumption of the index is split as follows:
-- $2.125$ bits per superstring character to store the BWT ($2.125 - 3$ bits per *k*-mer for typical genomes and pan-genomes).
-- Typically $0 - 0.8$ bits per *k*-mer to store the SA-transformed mask.
-- Optionally $1$ bit per superstring character to store the kLCP array.
-
-- $1$ byte per character of the largest entry in the queried fasta file (which is typically negligible).
-
-The construction of the index requires the full suffix array to be computed and requires up to 17 bytes per superstring character.
+On disk, the index takes 2 bits per character of the superstring for the BWT and 0.2–0.9 bits for the compressed
+mask; the optional kLCP array takes 0.1–0.5 bits per character compressed and 1 bit in memory.
 
 
 ## Testing
