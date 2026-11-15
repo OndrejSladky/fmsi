@@ -986,13 +986,15 @@ inline std::string find_index_file(const std::string &name) {
 
 /// The default length of the tabulated patterns, by the layout of the index: the table (8 * 4^length bytes)
 /// takes at most half a bit per row of the BWT in the fast layout (blocks of 64 bytes and the plain mask) and at
-/// most 1/32 bit per row in a compact one, so that it stays about one per cent of the index. The length is
-/// between 4 and 12 (at least 10 in the fast layout, as before the layouts were chosen at load).
+/// most 1/32 bit per row in a compact one, so that it stays about one per cent of the index. The length is at
+/// least 4 and at most 10, or 12 for an index of both strands in the fast layout, whose searches are the
+/// shortest and gain the most from it.
 inline unsigned default_prefix_length(const index &ix) {
     const bool fast = ix.bwt.block_bytes() == 64 && ix.mask_type == mask_kind::plain;
     const double budget_bits = fast ? ix.size / 2.0 : ix.size / 32.0;
-    unsigned length = fast ? 10 : 4;
-    while (length < 12 && 64.0 * ((uint64_t)1 << (2 * (length + 1))) <= budget_bits) ++length;
+    const unsigned longest = fast && ix.strands == 2 ? 12 : 10;
+    unsigned length = 4;
+    while (length < longest && 64.0 * ((uint64_t)1 << (2 * (length + 1))) <= budget_bits) ++length;
     return length;
 }
 

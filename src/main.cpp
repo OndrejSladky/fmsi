@@ -473,7 +473,8 @@ static int usage_query2(bool lookup) {
   std::cerr << "            [default: as the index file recommends]" << std::endl;
   std::cerr << "  -b INT  - number of k-mers (or sequences if -S) searched at the same time; 1 turns batching off [default: 32]" << std::endl;
   std::cerr << "  -p INT  - length of the patterns with tabulated SA intervals (8 * 4^INT bytes); 0 turns the table off" << std::endl;
-  std::cerr << "            [default: by the size and the layout of the index, at most 12]" << std::endl;
+  std::cerr << "            [default: by the size and the layout of the index: at most half a bit per row, 10 characters" << std::endl;
+  std::cerr << "            (12 for an index of both strands); at most 1/32 bit per row in a compact layout]" << std::endl;
   std::cerr << "  -B INT  - size of a block of sequences handed to a thread, in bytes of the query file [default: 131072]" << std::endl;
   std::cerr << "  -O      - accepted and ignored (the option of FMSI 0.4 for max-one masks; any mask is tested in constant time)" << std::endl;
   std::cerr << "  -k INT  - size of k-mers, checked against the index" << std::endl;
