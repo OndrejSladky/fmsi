@@ -26,7 +26,7 @@ static int usage() {
   std::cerr << "Contact: Ondrej Sladky (ondra.sladky@gmail.com)" << std::endl << std::endl;
   std::cerr << "Usage:   fmsi <command> [options]" << std::endl << std::endl;
   std::cerr << "Commands:" << std::endl;
-  std::cerr << "    index   - Index a masked superstring: one file <name>.fmsi (presets --small and --fast)." << std::endl;
+  std::cerr << "    index   - Index a masked superstring: one file <name>.fmsi (presets --extra-small, --small, --fast)." << std::endl;
   std::cerr << "    query   - Membership queries: for every k-mer of the queries, whether it is in the set." << std::endl;
   std::cerr << "    lookup  - Dictionary queries: the hash of every k-mer of the queries (-1 if it is not in the set)." << std::endl;
   std::cerr << "    access  - Dictionary queries: the k-mer of every hash, the inverse of lookup." << std::endl;
@@ -409,9 +409,14 @@ static int usage_index2() {
   std::cerr << "Indexes a masked superstring (FASTA, lower case = masked out; e.g. from KmerCamel) for membership" << std::endl;
   std::cerr << "queries (fmsi query) and dictionary queries (fmsi lookup, fmsi access). The index is one file." << std::endl << std::endl;
   std::cerr << "Presets:" << std::endl;
-  std::cerr << "    --small - size first [default]: the masked superstring alone, loaded in the most compact layout" << std::endl;
-  std::cerr << "    --fast  - speed first: the masked superstring and its reverse complement (twice the space), so that" << std::endl;
-  std::cerr << "              a k-mer is searched as it is only, never as its reverse complement; the fastest layout" << std::endl << std::endl;
+  std::cerr << "    --extra-small - size first: the masked superstring alone, loaded in the most compact layout" << std::endl;
+  std::cerr << "                    (about the memory of FMSI 0.4; queries about 1.5 times slower than with --small)" << std::endl;
+  std::cerr << "    --small       - [default] the masked superstring alone, loaded in the fastest layout (the same file" << std::endl;
+  std::cerr << "                    as --extra-small, about a sixth more memory)" << std::endl;
+  std::cerr << "    --fast        - speed first: the masked superstring and its reverse complement (twice the space), so" << std::endl;
+  std::cerr << "                    that a k-mer is searched as it is only, never as its reverse complement" << std::endl;
+  std::cerr << "    The layout in memory is chosen when the index is loaded: the presets --extra-small and --small write" << std::endl;
+  std::cerr << "    the same index and differ in the layout that the file recommends (fmsi query --extra-small, --small)." << std::endl << std::endl;
   std::cerr << "Options:" << std::endl;
   std::cerr << "    -o FILE - the index file [default: <masked-superstring>.fmsi]; .fmsi is added if missing" << std::endl;
   std::cerr << "    -k INT  - size of k-mers [default: number of trailing masked-out characters + 1]" << std::endl;
@@ -422,9 +427,9 @@ static int usage_index2() {
             << std::endl << std::endl;
   std::cerr << "Advanced:" << std::endl;
   std::cerr << "    -c INT  - layout in memory recommended by the file, which fmsi query -c overrides: bytes per block" << std::endl;
-  std::cerr << "              of the BWT, 64 (the fastest), 128 or 256 (the smallest) [default: 256 for --small, 64 for --fast]" << std::endl;
+  std::cerr << "              of the BWT, 64 (the fastest), 128 or 256 (the smallest) [default: 256 for --extra-small, else 64]" << std::endl;
   std::cerr << "    -m STR  - likewise the encoding of the mask: plain (the fastest), packed (smaller) or rrr (slow)" << std::endl;
-  std::cerr << "              [default: packed for --small, plain for --fast]" << std::endl;
+  std::cerr << "              [default: packed for --extra-small, else plain]" << std::endl;
   std::cerr << "    -M STR  - the type of the mask: min-one (every k-mer set once: lookup gives a minimal perfect hash)," << std::endl;
   std::cerr << "              max-one (every occurrence of a k-mer of the set is set), or auto: as the header of the masked" << std::endl;
   std::cerr << "              superstring states it (mask=min-one, as KmerCamel writes), else as computed [default: auto];" << std::endl;
@@ -454,6 +459,9 @@ static int usage_query2(bool lookup) {
   std::cerr << "  -L      - do not use the kLCP array" << std::endl;
   std::cerr << "  -t INT  - number of threads searching; with more than one, the queries are also read and the output printed" << std::endl;
   std::cerr << "            by a thread each [default: 1]" << std::endl << std::endl;
+  std::cerr << "Layout in memory (by default the one that the index file recommends, i.e. that of its preset):" << std::endl;
+  std::cerr << "  --extra-small - the most compact layout (-c 256 -m packed)" << std::endl;
+  std::cerr << "  --small       - the fastest layout (-c 64 -m plain)" << std::endl << std::endl;
   std::cerr << "Advanced:" << std::endl;
   std::cerr << "  -c INT  - bytes per block of the BWT in memory: 64 (the fastest), 128 or 256 (the smallest)" << std::endl;
   std::cerr << "            [default: as the index file recommends]" << std::endl;
@@ -513,10 +521,11 @@ int ms_index2(int argc, char *argv[]) {
   std::string mask_type = "auto";
   bool use_klcp = false;
   int threads = 1;
-  // Presets: --small (one strand) or --fast (both strands).
-  bool fast = false, lean = false;
-  enum { OPTION_SMALL = 256, OPTION_FAST, OPTION_LEAN };
+  // Presets: --extra-small and --small (one strand, the compact or the fast layout) or --fast (both strands).
+  bool fast = false, lean = false, extra_small = false;
+  enum { OPTION_SMALL = 256, OPTION_FAST, OPTION_LEAN, OPTION_EXTRA_SMALL };
   static const struct option long_options[] = {
+      {"extra-small", no_argument, nullptr, OPTION_EXTRA_SMALL},
       {"small", no_argument, nullptr, OPTION_SMALL},
       {"fast", no_argument, nullptr, OPTION_FAST},
       {"lean", no_argument, nullptr, OPTION_LEAN},
@@ -524,11 +533,16 @@ int ms_index2(int argc, char *argv[]) {
   };
   while ((c = getopt_long(argc, argv, "hk:m:c:lo:Qt:M:", long_options, nullptr)) >= 0) {
     switch (c) {
-    case OPTION_SMALL:
+    case OPTION_EXTRA_SMALL:
       fast = false;
+      extra_small = true;
+      break;
+    case OPTION_SMALL:
+      fast = extra_small = false;
       break;
     case OPTION_FAST:
       fast = true;
+      extra_small = false;
       break;
     case OPTION_LEAN:
       lean = true;
@@ -578,12 +592,12 @@ int ms_index2(int argc, char *argv[]) {
     return usage_index2();
   }
   const std::string index_path = index_file_name(prefix.empty() ? fn : prefix);
-  const std::string preset = fast ? "fast" : "small";
+  const std::string preset = fast ? "fast" : extra_small ? "extra-small" : "small";
   const fmsi2::layout preset_layout = fmsi2::preset_layout(preset);
   if (layout.bwt_block_bytes == 0) layout.bwt_block_bytes = preset_layout.bwt_block_bytes;
   if (layout.mask < 0) layout.mask = preset_layout.mask;
   if (fast && use_qsufsort) {
-    std::cerr << "ERROR: QSufSort (-Q) constructs the --small index only." << std::endl;
+    std::cerr << "ERROR: QSufSort (-Q) constructs the index of one strand only (--small, --extra-small)." << std::endl;
     return usage_index2();
   }
   if (lean && !fast) {
@@ -630,8 +644,13 @@ int ms_index2(int argc, char *argv[]) {
   const double index_bytes = (double)std::filesystem::file_size(index_path);
   std::cerr << "Written " << index_path << ": " << (uint64_t)index_bytes << " bytes (" << 8 * index_bytes / length
             << " bits per character of the superstring), mask " << statistics.type << " (" << statistics.source << ")" << std::endl;
+  const std::string klcp_path = index_path + fmsi2::KLCP_EXTENSION;
+  if (!use_klcp && std::filesystem::exists(klcp_path)) {
+    // The kLCP array of the index that this file replaces.
+    std::filesystem::remove(klcp_path);
+    std::cerr << "Removed " << klcp_path << ", the kLCP array of the previous index of this name" << std::endl;
+  }
   if (use_klcp) {
-    const std::string klcp_path = index_path + fmsi2::KLCP_EXTENSION;
     fmsi2::save_klcp_bits(m.klcp, k, description.uid(), klcp_path, threads);
     const double klcp_bytes = (double)std::filesystem::file_size(klcp_path);
     std::cerr << "Written " << klcp_path << ": " << (uint64_t)klcp_bytes << " bytes (" << 8 * klcp_bytes / length
@@ -685,8 +704,20 @@ int ms_query2(int argc, char *argv[], bool output_orders) {
   // Blocks of 128 kB keep the memory of the queries small and are as fast as larger ones.
   long long block_bases = 1 << 17;
   fmsi2::layout layout;
-  while ((c = getopt(argc, argv, "hq:k:b:p:SLt:B:c:m:O")) >= 0) {
+  enum { OPTION_LAYOUT_EXTRA_SMALL = 256, OPTION_LAYOUT_SMALL };
+  static const struct option long_options[] = {
+      {"extra-small", no_argument, nullptr, OPTION_LAYOUT_EXTRA_SMALL},
+      {"small", no_argument, nullptr, OPTION_LAYOUT_SMALL},
+      {nullptr, 0, nullptr, 0},
+  };
+  while ((c = getopt_long(argc, argv, "hq:k:b:p:SLt:B:c:m:O", long_options, nullptr)) >= 0) {
     switch (c) {
+    case OPTION_LAYOUT_EXTRA_SMALL:
+      layout = fmsi2::preset_layout("extra-small");
+      break;
+    case OPTION_LAYOUT_SMALL:
+      layout = fmsi2::preset_layout("small");
+      break;
     case 'h':
       usage = true;
       break;

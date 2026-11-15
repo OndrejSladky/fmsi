@@ -42,7 +42,7 @@ diff $TESTS/result_normalized2.txt $BIN/merged_normalized2.fa || exit 1
 echo "merged_normalized2.fa OK"
 
 # FMSI 2: one index file, with the same answers as FMSI 0.4, in both presets and every layout.
-for preset in small fast; do
+for preset in extra-small small fast; do
   $PROG index --$preset -l -k 3 -o $BIN/a_$preset $TESTS/integration_a.fa 2> /dev/null || exit 1
   [ -f $BIN/a_$preset.fmsi ] && [ -f $BIN/a_$preset.fmsi.klcp ] || exit 1
   $PROG info --check $BIN/a_$preset.fmsi > $BIN/a_$preset.info || exit 1
@@ -61,7 +61,7 @@ done
 echo "FMSI 2 membership OK"
 
 # Dictionary queries: the hashes of the --small index are those of FMSI 0.4.
-$PROG lookup -q $TESTS/queries.txt $BIN/a_small.fmsi > $BIN/a2_hash.txt 2> /dev/null || exit 1
+$PROG lookup --extra-small -q $TESTS/queries.txt $BIN/a_small.fmsi > $BIN/a2_hash.txt 2> /dev/null || exit 1
 diff $TESTS/result_a_complements_hash.txt $BIN/a2_hash.txt || exit 1
 # On a min-one mask, lookup is a minimal perfect hash and access inverts it.
 MINONE=data/GCF_test2_ones.fna.ms.k31

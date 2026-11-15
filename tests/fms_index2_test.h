@@ -749,8 +749,10 @@ TEST(FMS_INDEX2, FILE_LAYOUTS) {
         mbwt_with_same_kmer = false;
         const sdsl::bit_vector klcp = m.klcp;
         const fmsi2::mask_statistics statistics = fmsi2::classify_mask(m);
-        const fmsi2::description d = fmsi2::save_mbwt(m, k, both ? "fast" : "small", fmsi2::preset_layout(both ? "fast" : "small"),
-                                                      statistics, path, 1 + round % 3);
+        // The presets: both strands, and one strand in the fast or in the compact layout.
+        const std::string preset = both ? "fast" : round % 2 ? "extra-small" : "small";
+        const bool compact = preset == "extra-small";
+        const fmsi2::description d = fmsi2::save_mbwt(m, k, preset, fmsi2::preset_layout(preset), statistics, path, 1 + round % 3);
         fmsi2::save_klcp_bits(klcp, k, d.uid(), path + ".klcp", 1 + round % 3);
         fmsi2::index built;
         fmsi2::build(built, m, k, fmsi2::mask_kind::plain);
@@ -767,11 +769,11 @@ TEST(FMS_INDEX2, FILE_LAYOUTS) {
                 ASSERT_EQ(loaded.strands, both ? 2u : 1u);
                 ASSERT_EQ(loaded.size, built.size);
                 ASSERT_EQ(loaded.mask_ones, built.mask_ones);
-                ASSERT_EQ(loaded.preset, both ? "fast" : "small");
+                ASSERT_EQ(loaded.preset, preset);
                 ASSERT_EQ(loaded.mask_type_name, statistics.type);
                 // The recommended layout is that of the preset.
-                if (block_bytes == 0) ASSERT_EQ(loaded.bwt.block_bytes(), both ? 64u : 256u);
-                if (mask < 0) ASSERT_EQ(loaded.mask_type, both ? fmsi2::mask_kind::plain : fmsi2::mask_kind::packed);
+                if (block_bytes == 0) ASSERT_EQ(loaded.bwt.block_bytes(), compact ? 256u : 64u);
+                if (mask < 0) ASSERT_EQ(loaded.mask_type, compact ? fmsi2::mask_kind::packed : fmsi2::mask_kind::plain);
                 for (size_t i = 0; i < loaded.size; i += 1 + rng() % 7) ASSERT_EQ(loaded.mask_get(i), built.mask_get(i)) << "row " << i;
                 ASSERT_EQ(hashes_of(loaded, q), want) << "round " << round << " blocks " << block_bytes << " mask " << mask;
                 fmsi2::load_klcp(loaded, path + ".klcp", 2);

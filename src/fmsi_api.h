@@ -37,13 +37,15 @@
 
 namespace fmsi {
 
-/// What is indexed: the masked superstring alone (small), or with its reverse complement (fast: twice the size,
-/// about half the query time, as a k-mer is searched as it is only).
-enum class Preset { small, fast };
+/// The presets of `fmsi index`. extra_small and small index the masked superstring alone and differ in the layout
+/// in memory that they recommend (the most compact one, or the fastest one: about a sixth larger, about 1.5 times
+/// faster); fast indexes the superstring and its reverse complement (twice the size, about half the query time,
+/// as a k-mer is searched as it is only).
+enum class Preset { extra_small, small, fast };
 
 /// The layout of the index in memory, chosen when it is loaded: the one its file recommends (that of its preset),
-/// the most compact one (small), or the fastest one (fast: about a sixth larger than small for one strand).
-enum class Layout { recommended, small, fast };
+/// the most compact one, or the fastest one.
+enum class Layout { recommended, compact, fast };
 
 struct LoadOptions {
     Layout layout = Layout::recommended;
@@ -82,7 +84,7 @@ class Index {
 
     static fmsi2::layout layout_of(Layout layout, const std::string &preset) {
         if (layout == Layout::recommended) return fmsi2::preset_layout(preset);
-        return fmsi2::preset_layout(layout == Layout::fast ? "fast" : "small");
+        return fmsi2::preset_layout(layout == Layout::fast ? "fast" : "extra-small");
     }
 
     void prepare(bool access, int table_length) {
@@ -182,10 +184,12 @@ class Index {
                                 : compute_mbwt<__uint128_t>(masked_superstring, k, options.klcp, false, options.threads);
         mbwt_with_same_kmer = with_same_kmer;
         const fmsi2::mask_statistics statistics = fmsi2::decide_mask_type(fmsi2::classify_mask(m), options.mask_type, "");
-        fmsi2::layout layout = layout_of(options.layout, fast ? "fast" : "small");
+        const std::string preset = fast ? "fast" : options.preset == Preset::extra_small ? "extra-small" : "small";
+        fmsi2::layout layout = layout_of(options.layout, preset);
         if (options.access) layout.mask = (int)fmsi2::mask_kind::plain;
         auto ix = std::make_unique<fmsi2::index>();
         fmsi2::build(*ix, m, k, (fmsi2::mask_kind)layout.mask, layout.bwt_block_bytes, options.threads);
+        ix->preset = preset;
         ix->mask_type_name = statistics.type == "unknown" ? "" : statistics.type;
         ix->mask_type_source = statistics.source;
         Index index(std::move(ix));
@@ -194,14 +198,20 @@ class Index {
     }
 
     /// Write the index to a file (.fmsi is added to the name if missing) and its kLCP array, if it has one, to
-    /// <file>.klcp. The file recommends the layout of the preset of the index. Returns the name of the file.
+    /// <file>.klcp (a kLCP file of that name left by another index is removed). The file recommends the layout
+    /// of the preset of the index. Returns the name of the file.
     std::string save(const std::string &path, unsigned threads = 1) const {
         const std::string extension = fmsi2::INDEX_EXTENSION;
         const bool has_extension = path.size() >= extension.size() && path.compare(path.size() - extension.size(), extension.size(), extension) == 0;
         const std::string file = has_extension ? path : path + extension;
         const fmsi2::layout recommended = fmsi2::preset_layout(ix_->preset);
         fmsi2::save(*ix_, file, threads, &recommended);
-        if (ix_->has_klcp()) fmsi2::save_klcp(*ix_, file + fmsi2::KLCP_EXTENSION, threads);
+        if (ix_->has_klcp()) {
+            fmsi2::save_klcp(*ix_, file + fmsi2::KLCP_EXTENSION, threads);
+        } else {
+            // A kLCP file of this name belongs to the index that the file replaces.
+            std::remove((file + fmsi2::KLCP_EXTENSION).c_str());
+        }
         return file;
     }
 
@@ -212,8 +222,8 @@ class Index {
     bool both_strands() const { return ix_->strands == 2; }
 
     /// Number of hashes: lookup returns values below it, and access takes them. With a min-one mask this is the
-    /// number of k-mers of the set; for an index of both strands, the number of k-mers counted in each
-    /// orientation (twice the set, less its k-mers that are their own reverse complements).
+    /// number of k-mers of the set; for an index of both strands, twice that: a k-mer and its reverse complement
+    /// have a hash each (a k-mer that is its own reverse complement has two, of which lookup returns the smaller).
     uint64_t number_of_hashes() const { return ix_->mask_ones; }
 
     /// The type of the mask as the index states it: "min-one", "max-one", "min-one,max-one", "other", or "" if unknown.

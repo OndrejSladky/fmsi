@@ -22,8 +22,8 @@ TEST(FMSI_API, MEMBERSHIP_AND_DICTIONARY) {
         const auto represented = represented_kmers(ms, k);
 
         fmsi::BuildOptions options;
-        options.preset = round % 2 ? fmsi::Preset::fast : fmsi::Preset::small;
-        options.layout = std::vector<fmsi::Layout>{fmsi::Layout::recommended, fmsi::Layout::small, fmsi::Layout::fast}[round % 3];
+        options.preset = round % 2 ? fmsi::Preset::fast : round % 4 ? fmsi::Preset::extra_small : fmsi::Preset::small;
+        options.layout = std::vector<fmsi::Layout>{fmsi::Layout::recommended, fmsi::Layout::compact, fmsi::Layout::fast}[round % 3];
         options.klcp = round % 4 < 2;
         options.access = round % 8 < 4;
         options.threads = 1 + round % 3;
@@ -31,7 +31,7 @@ TEST(FMSI_API, MEMBERSHIP_AND_DICTIONARY) {
         const std::string file = built.save(path, 2);
         ASSERT_EQ(file, path + ".fmsi");
         fmsi::LoadOptions load;
-        load.layout = std::vector<fmsi::Layout>{fmsi::Layout::fast, fmsi::Layout::recommended, fmsi::Layout::small}[round % 3];
+        load.layout = std::vector<fmsi::Layout>{fmsi::Layout::fast, fmsi::Layout::recommended, fmsi::Layout::compact}[round % 3];
         load.access = round % 8 >= 4;
         fmsi::Index loaded = fmsi::Index::load(round % 2 ? file : path, load);
 
@@ -103,7 +103,9 @@ TEST(FMSI_API, MEMBERSHIP_AND_DICTIONARY) {
                 ASSERT_TRUE(represented.count(canonical(kmer)));
                 if (h % 5 == 0) ASSERT_EQ(index->access(h), kmer);
                 if (index->both_strands()) {
-                    ASSERT_EQ(index->lookup(kmer), (int64_t)h);
+                    // A k-mer that is its own reverse complement has two hashes, and lookup gives the smaller one.
+                    const bool second = kmer == reverse_complement(kmer) && index->lookup(kmer) + 1 == (int64_t)h;
+                    if (!second) ASSERT_EQ(index->lookup(kmer), (int64_t)h);
                 } else {
                     ASSERT_EQ(index->lookup(kmer), (int64_t)h);
                     ASSERT_TRUE(seen.insert(canonical(kmer)).second);
