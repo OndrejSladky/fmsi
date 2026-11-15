@@ -1111,4 +1111,122 @@ TEST(FMS_INDEX2, WIDE_INTEGERS) {
     }
 }
 
+/// The runs of a mask and its bits read back from them, for any range of positions.
+TEST(TEXT_MASK, RUNS) {
+    std::mt19937_64 rng(13);
+    for (int round = 0; round < 200; ++round) {
+        const size_t size = round < 5 ? round : 1 + rng() % 3000;
+        std::string ms(size, 'a');
+        // Runs of random lengths, also of length one, starting with either value.
+        bool upper = rng() % 2;
+        for (size_t i = 0; i < size;) {
+            const size_t length = 1 + rng() % (round % 3 == 0 ? 3 : 200);
+            for (size_t j = i; j < std::min(size, i + length); ++j) ms[j] = upper ? 'C' : 'g';
+            i += length;
+            upper = !upper;
+        }
+        const std::vector<uint8_t> runs = fmsi2::mask_runs(ms);
+        for (uint64_t step : {(uint64_t)1, (uint64_t)7, (uint64_t)64, (uint64_t)1000, (uint64_t)1 << 16}) {
+            const fmsi2::run_mask mask(runs.data(), runs.size(), size, step);
+            ASSERT_EQ(mask.size(), size);
+            for (int range = 0; range < 20 && size > 0; ++range) {
+                const uint64_t begin = rng() % size, end = begin + rng() % (size - begin + 1), shift = rng() % 70;
+                std::vector<uint64_t> bits((end - begin + shift) / 64 + 1, 0);
+                mask.fill(begin, end, bits.data(), shift);
+                for (uint64_t p = begin; p < end; ++p) {
+                    const uint64_t bit = p - begin + shift;
+                    ASSERT_EQ((bool)((bits[bit >> 6] >> (bit & 63)) & 1), (bool)is_upper(ms[p])) << ms << " position " << p << " step " << step;
+                }
+                // Nothing outside the range.
+                size_t ones = 0, want = 0;
+                for (uint64_t word : bits) ones += __builtin_popcountll(word);
+                for (uint64_t p = begin; p < end; ++p) want += is_upper(ms[p]);
+                ASSERT_EQ(ones, want);
+            }
+        }
+    }
+    // Damaged runs are refused.
+    const std::vector<uint8_t> runs = fmsi2::mask_runs("aaCCCg");
+    ASSERT_THROW(fmsi2::run_mask(runs.data(), runs.size(), 5, 4), std::invalid_argument);
+    ASSERT_THROW(fmsi2::run_mask(runs.data(), runs.size(), 7, 4), std::invalid_argument);
+    ASSERT_THROW(fmsi2::run_mask(runs.data(), runs.size() - 1, 6, 4), std::invalid_argument);
+}
+
+/// An index file with the mask stored along the superstring loads to the same index as one with the mask in
+/// the order of the suffix array: one strand and both, every construction, every layout, any step of the samples.
+TEST(TEXT_MASK, FILE) {
+    std::mt19937_64 rng(14);
+    const std::string path = testing::TempDir() + "fmsi2_text_mask_test";
+    for (int round = 0; round < 18; ++round) {
+        const size_t k = std::vector<size_t>{2, 5, 13, 31, 32, 33}[round % 6];
+        const std::string ms = random_mask(rng, random_superstring(rng, k + rng() % (round < 6 ? 300 : 40000)), k, round % 2);
+        queries q = make_queries(rng, ms, k);
+        // 0: one strand; 1: both strands; 2: both strands by the lean construction.
+        const int construction = round % 3;
+        const size_t step = std::vector<size_t>{1, 3, 64, 1000, 5000, (size_t)1 << 16}[(round / 3) % 6];
+        fmsi2::text_mask along_text;
+        along_text.runs = fmsi2::mask_runs(ms);
+        along_text.characters = ms.size();
+        mbwt_sample_step = step;
+        mbwt_with_same_kmer = true;
+        std::string copy = ms;
+        mbwt m = construction == 0 ? (k <= 32 ? compute_mbwt<uint64_t>(copy, k, false, false, 1 + round % 3)
+                                              : compute_mbwt<__uint128_t>(copy, k, false, false, 1 + round % 3))
+                 : construction == 1 ? doubled::compute_mbwt(copy, k, false, 1 + round % 3)
+                                     : doubled::compute_mbwt_lean(copy, k, false, 1 + round % 3, path + ".tmp");
+        mbwt_with_same_kmer = false;
+        const std::string preset = construction == 0 ? "small" : "fast";
+        const fmsi2::mask_statistics statistics = fmsi2::classify_mask(m);
+        fmsi2::save_mbwt(m, k, preset, fmsi2::preset_layout(preset), statistics, path + ".text.fmsi", 2, "", &along_text);
+        fmsi2::save_mbwt(m, k, preset, fmsi2::preset_layout(preset), statistics, path + ".sa.fmsi", 2);
+        mbwt_sample_step = 0;
+        {
+            fmsi2::file::reader in(path + ".text.fmsi");
+            ASSERT_EQ(in.meta().get("mask_order"), "text");
+            ASSERT_EQ(in.get("MASK").items, ms.size());
+            ASSERT_NE(in.find("SAMPLES"), nullptr);
+        }
+        for (uint32_t block_bytes : {64, 256}) {
+            for (int mask : {0, 1, 2}) {
+                fmsi2::layout layout;
+                layout.bwt_block_bytes = block_bytes;
+                layout.mask = mask;
+                fmsi2::index text, sa;
+                fmsi2::load(text, path + ".text.fmsi", 1 + (round + mask) % 4, layout);
+                fmsi2::load(sa, path + ".sa.fmsi", 1, layout);
+                ASSERT_EQ(text.size, sa.size);
+                ASSERT_EQ(text.mask_ones, sa.mask_ones);
+                ASSERT_EQ(text.uid, sa.uid);
+                for (size_t i = 0; i < text.size; ++i) {
+                    ASSERT_EQ(text.mask_get(i), sa.mask_get(i)) << "round " << round << " row " << i << " step " << step << " k " << k;
+                }
+                if (mask == 0) ASSERT_EQ(hashes_of(text, q), hashes_of(sa, q));
+            }
+        }
+        // A file whose samples or mask do not fit its BWT is refused: swap two samples, or flip the first run.
+        if (round % 3 == 0 && ms.size() / step >= 2) {
+            std::ifstream in(path + ".text.fmsi", std::ios::binary);
+            std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+            in.close();
+            fmsi2::file::reader table(path + ".text.fmsi");
+            const fmsi2::file::section_entry &samples = table.get("SAMPLES");
+            uint64_t first, second;
+            memcpy(&first, bytes.data() + samples.offset + 16, 8);
+            memcpy(&second, bytes.data() + samples.offset + 24, 8);
+            if (first != second) {
+                memcpy(&bytes[samples.offset + 16], &second, 8);
+                memcpy(&bytes[samples.offset + 24], &first, 8);
+                std::ofstream out(path + ".bad.fmsi", std::ios::binary);
+                out.write(bytes.data(), bytes.size());
+                out.close();
+                fmsi2::index bad;
+                ASSERT_THROW(fmsi2::load(bad, path + ".bad.fmsi"), std::invalid_argument);
+                std::filesystem::remove(path + ".bad.fmsi");
+            }
+        }
+    }
+    std::filesystem::remove(path + ".text.fmsi");
+    std::filesystem::remove(path + ".sa.fmsi");
+}
+
 } // namespace

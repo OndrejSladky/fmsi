@@ -447,6 +447,9 @@ struct mbwt {
     /// With same_kmer, for a text of both strands and an even k: bit i is set iff the k-mer of row i is its own
     /// reverse complement; its occurrences in the superstring then appear twice among the rows.
     sdsl::bit_vector palindrome;
+    /// Optional (mbwt_sample_step): the rows of the suffixes at the positions step, 2 step, ... of the text, for
+    /// storing the mask in the order of the text (text_mask.h).
+    std::vector<uint64_t> samples;
     size_t dollar_position = 0;
     /// The row of the second sentinel, if the text has two (the doubled text of FMSI 2 --fast), or NO_ROW.
     static constexpr size_t NO_ROW = ~(size_t)0;
@@ -456,6 +459,9 @@ struct mbwt {
 /// Texts of fewer characters than this get a suffix array of 32-bit integers (5 bytes per character), longer
 /// ones of 64-bit integers (9 bytes per character). A variable, so that tests reach the 64-bit code with short texts.
 inline size_t suffix_array_32bit_limit = (size_t)INT32_MAX;
+
+/// The distance of the text positions whose rows the constructions record in mbwt::samples (0: none).
+inline size_t mbwt_sample_step = 0;
 
 /// Whether the constructions of the MBWT also fill mbwt::same_kmer (one more bit per row while constructing).
 inline bool mbwt_with_same_kmer = false;
@@ -529,6 +535,8 @@ mbwt mbwt_from_suffix_array(std::string &ms, const sa_t *sa, int k, bool use_klc
 
     result.sa_transformed_mask = sdsl::bit_vector(ms.size() + 1);
     if (mbwt_with_same_kmer) result.same_kmer = sdsl::bit_vector(ms.size() + 1, 0);
+    const size_t step = mbwt_sample_step;
+    if (step != 0) result.samples.assign(ms.size() / step, 0);
     result.bwt.resize(ms.size() + 1);
     // A chunk is a whole number of 64-bit words of the mask. The characters next to the suffixes
     // a few steps ahead are prefetched, as the suffixes start anywhere in the superstring.
@@ -541,6 +549,8 @@ mbwt mbwt_from_suffix_array(std::string &ms, const sa_t *sa, int k, bool use_klc
         for (size_t i = begin; i < end; ++i) {
             if (i + PREFETCH_DISTANCE <= ms.size()) __builtin_prefetch(text + sa[i + PREFETCH_DISTANCE]);
             size_t sa_i = sa[i];
+            // Each sampled position is the suffix of one row, so the threads write to different entries.
+            if (step != 0 && sa_i != 0 && sa_i % step == 0) result.samples[sa_i / step - 1] = i;
             if (same != nullptr && i < n) {
                 const size_t next = sa[i + 1];
                 if (sa_i + length <= n && next + length <= n && same_letters(text + sa_i, text + next, length)) {

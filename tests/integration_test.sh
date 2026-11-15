@@ -80,5 +80,21 @@ $PROG index --fast -o $BIN/other $OTHER 2> /dev/null || exit 1
 $PROG info $BIN/other.fmsi | grep -q "^mask_type	other$" || exit 1
 echo "FMSI 2 dictionary OK"
 
+# The mask stored along the superstring (--compact-file): the same answers; export gives the superstring back.
+for preset in small fast; do
+  $PROG index --$preset -z -o $BIN/compact_$preset $MINONE 2> /dev/null || exit 1
+  $PROG info --check $BIN/compact_$preset.fmsi | grep -q "^mask_order	text$" || exit 1
+  $PROG index --$preset -o $BIN/plain_$preset $MINONE 2> /dev/null || exit 1
+  for layout in "" "--extra-small"; do
+    $PROG lookup $layout -S -q $BIN/kmers.fa $BIN/compact_$preset.fmsi > $BIN/compact.txt 2> /dev/null || exit 1
+    $PROG lookup $layout -S -q $BIN/kmers.fa $BIN/plain_$preset.fmsi > $BIN/plain.txt 2> /dev/null || exit 1
+    diff $BIN/plain.txt $BIN/compact.txt || exit 1
+  done
+  $PROG export $BIN/compact_$preset.fmsi > $BIN/exported.fa 2> /dev/null || exit 1
+  diff <(sed -n 2p $MINONE) <(sed -n 2p $BIN/exported.fa) || exit 1
+done
+[ "$(wc -c < $BIN/compact_small.fmsi)" -lt "$(wc -c < $BIN/plain_small.fmsi)" ] || exit 1
+echo "FMSI 2 compact file and export OK"
+
 echo "All tests passed"
 

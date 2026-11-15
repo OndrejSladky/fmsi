@@ -21,7 +21,7 @@
 
 static int usage() {
   std::cerr << std::endl;
-  std::cerr << "Program: FMSI - a tool for space-efficient k-mer set indexing via masked superstrings." << std::endl;
+  std::cerr << "Program: FMSI 2 - a space-efficient index of k-mer sets based on masked superstrings." << std::endl;
   std::cerr << "Version: " << VERSION << std::endl;
   std::cerr << "Contact: Ondrej Sladky (ondra.sladky@gmail.com)" << std::endl << std::endl;
   std::cerr << "Usage:   fmsi <command> [options]" << std::endl << std::endl;
@@ -30,6 +30,7 @@ static int usage() {
   std::cerr << "    query   - Membership queries: for every k-mer of the queries, whether it is in the set." << std::endl;
   std::cerr << "    lookup  - Dictionary queries: the hash of every k-mer of the queries (-1 if it is not in the set)." << std::endl;
   std::cerr << "    access  - Dictionary queries: the k-mer of every hash, the inverse of lookup." << std::endl;
+  std::cerr << "    export  - Print the masked superstring of an index." << std::endl;
   std::cerr << "    info    - Print what an index file holds." << std::endl;
   std::cerr << "    convert - Rewrite an index of an older format as a .fmsi file." << std::endl << std::endl;
   std::cerr << "Commands of FMSI 0.4 (its index of several files; `fmsi legacy` lists them):" << std::endl;
@@ -422,6 +423,9 @@ static int usage_index2() {
   std::cerr << "    -k INT  - size of k-mers [default: number of trailing masked-out characters + 1]" << std::endl;
   std::cerr << "    -l      - also write the kLCP array (<index file>.klcp), which speeds up streamed queries (query -S)" << std::endl;
   std::cerr << "              of sequences that do not follow the superstring, e.g. of RNA-seq reads" << std::endl;
+  std::cerr << "    -z, --compact-file - store the mask along the superstring, where it is a few runs: a file smaller by" << std::endl;
+  std::cerr << "              0.2 to 0.7 bits per character, the same index once loaded; loading takes about 10 ns per" << std::endl;
+  std::cerr << "              character on one thread instead of 2 (fmsi query -t loads on several)" << std::endl;
   std::cerr << "    -t INT  - number of threads [default: 1]; the suffix array is constructed on "
             << (SUFFIX_ARRAY_THREADED ? "all of them (compiled with OpenMP)" : "one thread (compiled without OpenMP)")
             << std::endl << std::endl;
@@ -437,7 +441,7 @@ static int usage_index2() {
   std::cerr << "    --lean  - with --fast: merge the suffix arrays of the superstring and of its reverse complement instead" << std::endl;
   std::cerr << "              of constructing that of both (less memory; superstrings below 2^31 characters; temporary" << std::endl;
   std::cerr << "              files <index file>.tmp.sa_*); the index is the same" << std::endl;
-  std::cerr << "    -Q      - construct the suffix array by QSufSort instead of libsais (--small only)" << std::endl << std::endl;
+  std::cerr << "    -Q      - construct the suffix array by QSufSort instead of libsais (an index of one strand only)" << std::endl << std::endl;
   return 1;
 }
 
@@ -523,15 +527,18 @@ int ms_index2(int argc, char *argv[]) {
   int threads = 1;
   // Presets: --extra-small and --small (one strand, the compact or the fast layout) or --fast (both strands).
   bool fast = false, lean = false, extra_small = false;
+  // The mask stored along the superstring: a smaller file, loaded more slowly.
+  bool compact_file = false;
   enum { OPTION_SMALL = 256, OPTION_FAST, OPTION_LEAN, OPTION_EXTRA_SMALL };
   static const struct option long_options[] = {
+      {"compact-file", no_argument, nullptr, 'z'},
       {"extra-small", no_argument, nullptr, OPTION_EXTRA_SMALL},
       {"small", no_argument, nullptr, OPTION_SMALL},
       {"fast", no_argument, nullptr, OPTION_FAST},
       {"lean", no_argument, nullptr, OPTION_LEAN},
       {nullptr, 0, nullptr, 0},
   };
-  while ((c = getopt_long(argc, argv, "hk:m:c:lo:Qt:M:", long_options, nullptr)) >= 0) {
+  while ((c = getopt_long(argc, argv, "hk:m:c:lo:Qt:M:z", long_options, nullptr)) >= 0) {
     switch (c) {
     case OPTION_EXTRA_SMALL:
       fast = false;
@@ -566,6 +573,9 @@ int ms_index2(int argc, char *argv[]) {
       break;
     case 'l':
       use_klcp = true;
+      break;
+    case 'z':
+      compact_file = true;
       break;
     case 'o':
       prefix = optarg;
@@ -620,6 +630,13 @@ int ms_index2(int argc, char *argv[]) {
   }
 
   size_t length = ms.size();
+  // The mask along the superstring, and the rows of the sampled positions that the file then needs.
+  fmsi2::text_mask along_text;
+  if (compact_file) {
+    along_text.runs = fmsi2::mask_runs(ms);
+    along_text.characters = length;
+    mbwt_sample_step = fmsi2::SAMPLE_STEP;
+  }
   // The rows that start with the same k-mer tell the type of the mask, or check the one that is stated.
   mbwt_with_same_kmer = true;
   if (use_klcp && !fast && k > 65) {
@@ -640,7 +657,8 @@ int ms_index2(int argc, char *argv[]) {
   // The index is written from the MBWT; its layout in memory is built when it is loaded.
   const fmsi2::mask_statistics statistics = fmsi2::decide_mask_type(fmsi2::classify_mask(m), mask_type, header_field(header, "mask"));
   if (!statistics.warning.empty()) std::cerr << "WARNING: " << statistics.warning << "." << std::endl;
-  const fmsi2::description description = fmsi2::save_mbwt(m, k, preset, layout, statistics, index_path, threads, header);
+  const fmsi2::description description =
+      fmsi2::save_mbwt(m, k, preset, layout, statistics, index_path, threads, header, compact_file ? &along_text : nullptr);
   const double index_bytes = (double)std::filesystem::file_size(index_path);
   std::cerr << "Written " << index_path << ": " << (uint64_t)index_bytes << " bytes (" << 8 * index_bytes / length
             << " bits per character of the superstring), mask " << statistics.type << " (" << statistics.source << ")" << std::endl;
@@ -1277,6 +1295,27 @@ int ms_convert(int argc, char *argv[]) {
   return 0;
 }
 
+/// Print the masked superstring of an index as FASTA.
+int ms_export2(int argc, char *argv[]) {
+  if (argc != 2 || std::string(argv[1]) == "-h") {
+    std::cerr << std::endl << "Usage:   fmsi export <index.fmsi>" << std::endl << std::endl;
+    std::cerr << "Prints the masked superstring of the index as FASTA: the superstring, in upper case where the mask is" << std::endl;
+    std::cerr << "set, under the header of the masked superstring that was indexed. `fmsi index` gives the same index back." << std::endl << std::endl;
+    return argc == 2 ? 0 : 1;
+  }
+  const std::string name = argv[1], path = fmsi2::find_index_file(name);
+  if (path.empty()) {
+    std::cerr << "ERROR: No index file " << name << "." << std::endl;
+    return 1;
+  }
+  fmsi2::index index;
+  fmsi2::load(index, path);
+  const std::string superstring = fmsi2::export_masked_superstring(index);
+  std::cout << ">" << (index.superstring_header.empty() ? "maskedsuperstring k=" + std::to_string(index.k) : index.superstring_header)
+            << "\n" << superstring << "\n";
+  return 0;
+}
+
 /// Print what an index file holds: its metadata, its sections, and the kLCP file next to it.
 int ms_info(int argc, char *argv[]) {
   bool check = false;
@@ -1374,6 +1413,7 @@ int main(int argc, char *argv[]) {
     if (op == "lookup" || op == "lookup2") return ms_query2(argc - 1, argv + 1, true);
     if (op == "access" || op == "access2") return ms_access2(argc - 1, argv + 1);
     if (op == "info") return ms_info(argc - 1, argv + 1);
+    if (op == "export") return ms_export2(argc - 1, argv + 1);
     if (op == "convert") return ms_convert(argc - 1, argv + 1);
     if (op == "legacy") return legacy(argc - 1, argv + 1);
   } catch (const std::exception &error) {

@@ -144,6 +144,7 @@ mbwt empty_mbwt(const text &t, bool use_klcp) {
     if (use_klcp) m.klcp = sdsl::bit_vector(t.length() + 1, 0);
     if (mbwt_with_same_kmer) m.same_kmer = sdsl::bit_vector(t.length() + 1, 0);
     if (mbwt_with_same_kmer && t.k % 2 == 0) m.palindrome = sdsl::bit_vector(t.length() + 1, 0);
+    if (mbwt_sample_step != 0) m.samples.assign(t.length() / mbwt_sample_step, 0);
     return m;
 }
 
@@ -163,6 +164,7 @@ void write_rows(const text &t, mbwt &m, size_t row, const position_t *positions,
     uint64_t *same = m.same_kmer.size() > 0 ? m.same_kmer.data() : nullptr;
     uint64_t *palindrome = m.palindrome.size() > 0 ? m.palindrome.data() : nullptr;
     uint64_t mask_word = 0, klcp_word = 0, same_word = 0, palindrome_word = 0;
+    const size_t step = m.samples.empty() ? 0 : mbwt_sample_step;
     size_t word = row >> 6;
     auto flush = [&]() {
         if (mask_word != 0) __atomic_fetch_or(mask + word, mask_word, __ATOMIC_RELAXED);
@@ -183,6 +185,7 @@ void write_rows(const text &t, mbwt &m, size_t row, const position_t *positions,
             word = i >> 6;
         }
         uint64_t p = positions[x];
+        if (step != 0 && p != 0 && p % step == 0) m.samples[p / step - 1] = i;
         uint8_t before = p == 0 ? 0 : codes[p - 1] & SYMBOL_BITS;
         if (before == 0) {
             // The suffix T[0..] or Y = T[n + 1..], preceded by the end of T or the separator.

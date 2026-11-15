@@ -15,6 +15,7 @@
 #include <cstring>
 #include <iostream>
 #include <new>
+#include <sys/mman.h>
 #include <stdexcept>
 #include <type_traits>
 #include <vector>
@@ -50,42 +51,68 @@
 
 namespace fmsi2 {
 
-/// A zero-initialized heap array aligned to 256 bytes (the largest block, and a multiple of a cache line).
+/// A zero-initialized array aligned to 256 bytes (the largest block, and a multiple of a cache line). A large
+/// array is mapped from the system, whose pages are zero and take memory only once they are written, so that a
+/// structure filled piece by piece takes memory as it grows.
 template <typename T>
 class aligned_array {
+    static constexpr size_t MAPPED_FROM_BYTES = (size_t)1 << 20;
     T *data_ = nullptr;
     size_t size_ = 0;
+    bool mapped_ = false;
+
+    void release() {
+        if (data_ == nullptr) return;
+        if (mapped_) {
+            munmap(data_, size_ * sizeof(T));
+        } else {
+            free(data_);
+        }
+        data_ = nullptr;
+        size_ = 0;
+        mapped_ = false;
+    }
 
   public:
     aligned_array() = default;
     explicit aligned_array(size_t size) { resize(size); }
     aligned_array(const aligned_array &) = delete;
     aligned_array &operator=(const aligned_array &) = delete;
-    aligned_array(aligned_array &&other) noexcept : data_(other.data_), size_(other.size_) {
+    aligned_array(aligned_array &&other) noexcept : data_(other.data_), size_(other.size_), mapped_(other.mapped_) {
         other.data_ = nullptr;
         other.size_ = 0;
+        other.mapped_ = false;
     }
     aligned_array &operator=(aligned_array &&other) noexcept {
         if (this != &other) {
-            free(data_);
+            release();
             data_ = other.data_;
             size_ = other.size_;
+            mapped_ = other.mapped_;
             other.data_ = nullptr;
             other.size_ = 0;
+            other.mapped_ = false;
         }
         return *this;
     }
-    ~aligned_array() { free(data_); }
+    ~aligned_array() { release(); }
 
     void resize(size_t size) {
-        free(data_);
-        data_ = nullptr;
-        size_ = size;
+        release();
         if (size == 0) return;
-        void *memory = nullptr;
-        if (posix_memalign(&memory, 256, size * sizeof(T)) != 0) throw std::bad_alloc();
-        memset(memory, 0, size * sizeof(T));
-        data_ = static_cast<T *>(memory);
+        const size_t bytes = size * sizeof(T);
+        if (bytes >= MAPPED_FROM_BYTES) {
+            void *memory = mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+            if (memory == MAP_FAILED) throw std::bad_alloc();
+            data_ = static_cast<T *>(memory);
+            mapped_ = true;
+        } else {
+            void *memory = nullptr;
+            if (posix_memalign(&memory, 256, bytes) != 0) throw std::bad_alloc();
+            memset(memory, 0, bytes);
+            data_ = static_cast<T *>(memory);
+        }
+        size_ = size;
     }
 
     T &operator[](size_t i) { return data_[i]; }
@@ -792,6 +819,15 @@ class bit_rank {
         size_t p = i % BLOCK_BITS + HEADER_BITS;
         blocks_[i / BLOCK_BITS].words[p / 64] |= 1ULL << (p % 64);
     }
+
+    /// Set bit i to one from one of several threads; valid only before finalize().
+    void set_atomic(size_t i) {
+        size_t p = i % BLOCK_BITS + HEADER_BITS;
+        __atomic_fetch_or(&blocks_[i / BLOCK_BITS].words[p / 64], 1ULL << (p % 64), __ATOMIC_RELAXED);
+    }
+
+    /// Prefetch the word of bit i for writing.
+    void prefetch_write(size_t i) const { __builtin_prefetch(&blocks_[i / BLOCK_BITS], 1); }
 
     /// Set the bits i, ..., i + count - 1 to the low count bits of [bits] (count <= 64); valid only before
     /// finalize(), on bits that are not set yet.

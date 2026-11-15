@@ -26,6 +26,7 @@
 #include "fms_index.h"
 #include "index_file.h"
 #include "rank2.h"
+#include "text_mask.h"
 #include "version.h"
 
 namespace fmsi2 {
@@ -450,6 +451,11 @@ inline bool parse_mask_name(const std::string &name, mask_kind &kind) {
 static const uint32_t FORMAT_VERSION = 5;
 static const uint32_t ENCODING_BWT_PACKED = 1;
 static const uint32_t ENCODING_MASK_SA_BITS = 1;
+/// The mask of the superstring in the order of the text, as its runs (text_mask.h); with it, the section SAMPLES
+/// (encoding 1): the distance of the sampled positions, their number, and the rows of their suffixes (64-bit
+/// integers).
+static const uint32_t ENCODING_MASK_TEXT_RUNS = 2;
+static const uint32_t ENCODING_SAMPLES = 1;
 static const uint32_t ENCODING_KLCP_BITS = 1;
 static const char *const INDEX_EXTENSION = ".fmsi";
 static const char *const KLCP_EXTENSION = ".klcp";
@@ -478,6 +484,8 @@ struct description {
     layout recommended;
     /// The type of the mask and how it is known (mask_statistics), and the FASTA header of the masked superstring.
     std::string mask_type, mask_type_source, superstring_header;
+    /// How the file stores the mask: "sa" (in the order of the suffix array) or "text" (along the superstring).
+    std::string mask_order = "sa";
 
     /// An identifier of the content: a hash of the numbers above, which two different indexes hardly share.
     uint64_t uid() const {
@@ -507,11 +515,11 @@ inline std::string hex(uint64_t value) {
 
 inline std::string creator() { return std::string("fmsi ") + VERSION; }
 
-/// Write an index file. bwt(begin, end, buffer) gives the bytes [begin, end) of the packed BWT, mask(begin, end,
-/// buffer) those of the mask; both are called from several threads.
+/// Write an index file. bwt(begin, end, buffer) gives the bytes [begin, end) of the packed BWT, from several
+/// threads; mask(out) adds the section of the mask (and what belongs to it).
 inline void write_index_file(const std::string &path, const description &d,
                              const std::function<void(uint64_t, uint64_t, uint8_t *)> &bwt,
-                             const std::function<void(uint64_t, uint64_t, uint8_t *)> &mask, unsigned threads = 1) {
+                             const std::function<void(file::writer &)> &mask, unsigned threads = 1) {
     file::metadata meta;
     meta.set("kind", "index");
     meta.set("creator", creator());
@@ -527,7 +535,7 @@ inline void write_index_file(const std::string &path, const description &d,
     meta.set("mask_type", d.mask_type.empty() ? "unknown" : d.mask_type);
     if (!d.mask_type_source.empty()) meta.set("mask_type_source", d.mask_type_source);
     if (!d.superstring_header.empty()) meta.set("superstring_header", d.superstring_header);
-    meta.set("mask_order", "sa");
+    meta.set("mask_order", d.mask_order);
     meta.set("layout", std::to_string(d.recommended.bwt_block_bytes) + "," + mask_name((mask_kind)d.recommended.mask));
     meta.set("uid", hex(d.uid()));
     const std::string text = meta.text();
@@ -535,9 +543,25 @@ inline void write_index_file(const std::string &path, const description &d,
     file::writer out(path);
     out.add("META", 1, file::REQUIRED, meta.items().size(), text.data(), text.size());
     out.add_stream("BWT", ENCODING_BWT_PACKED, file::REQUIRED, d.rows, (d.rows + 3) / 4, false, threads, bwt);
-    out.add_stream("MASK", ENCODING_MASK_SA_BITS, file::REQUIRED, d.rows, (d.rows + 7) / 8, true, threads, mask);
+    mask(out);
     out.finish();
 }
+
+/// The section of a mask in the order of the suffix array: bits(begin, end, buffer) gives the bytes [begin, end)
+/// of the bits, from several threads.
+inline std::function<void(file::writer &)> mask_bits_section(uint64_t rows, unsigned threads,
+                                                              std::function<void(uint64_t, uint64_t, uint8_t *)> bits) {
+    return [=](file::writer &out) {
+        out.add_stream("MASK", ENCODING_MASK_SA_BITS, file::REQUIRED, rows, (rows + 7) / 8, true, threads, bits);
+    };
+}
+
+/// The mask of a superstring along the text, for an index file that stores it so (fmsi index --compact-file):
+/// its runs (mask_runs) and its length.
+struct text_mask {
+    std::vector<uint8_t> runs;
+    uint64_t characters = 0;
+};
 
 /// Bytes [begin, end) of a bit vector of sdsl, bit i at bit i % 8 of byte i / 8.
 inline void bit_vector_bytes(const sdsl::bit_vector &bits, uint64_t begin, uint64_t end, uint8_t *buffer) {
@@ -549,8 +573,10 @@ inline void bit_vector_bytes(const sdsl::bit_vector &bits, uint64_t begin, uint6
 }
 
 /// Write the index of an MBWT to a file, without building the index in memory. Returns its description.
+/// With [along_text] (and the samples of the construction, mbwt::samples), the mask is stored along the superstring.
 inline description save_mbwt(const mbwt &m, int k, const std::string &preset, layout recommended, const mask_statistics &statistics,
-                             const std::string &path, unsigned threads = 1, const std::string &superstring_header = "") {
+                             const std::string &path, unsigned threads = 1, const std::string &superstring_header = "",
+                             const text_mask *along_text = nullptr) {
     description d;
     d.k = k;
     d.rows = m.bwt.size();
@@ -581,6 +607,23 @@ inline description save_mbwt(const mbwt &m, int k, const std::string &preset, la
     d.counts[3] = totals[0] + totals[1] + totals[2];
     const uint64_t *words = m.sa_transformed_mask.data();
     for (size_t w = 0; w < (m.sa_transformed_mask.size() + 63) / 64; ++w) d.mask_ones += __builtin_popcountll(words[w]);
+    std::function<void(file::writer &)> mask;
+    if (along_text != nullptr) {
+        const uint64_t step = mbwt_sample_step, length = d.strands == 2 ? 2 * along_text->characters + 1 : along_text->characters;
+        if (step == 0 || m.samples.size() != length / step) throw std::invalid_argument("the construction did not sample the suffix array");
+        d.mask_order = "text";
+        mask = [&m, along_text, step, threads](file::writer &out) {
+            const std::vector<uint8_t> &runs = along_text->runs;
+            out.add_stream("MASK", ENCODING_MASK_TEXT_RUNS, file::REQUIRED, along_text->characters, runs.size(), true, threads,
+                           [&](uint64_t begin, uint64_t end, uint8_t *buffer) { memcpy(buffer, runs.data() + begin, end - begin); }, 9);
+            std::vector<uint64_t> samples = {step, (uint64_t)m.samples.size()};
+            samples.insert(samples.end(), m.samples.begin(), m.samples.end());
+            out.add("SAMPLES", ENCODING_SAMPLES, file::REQUIRED, m.samples.size(), samples.data(), samples.size() * sizeof(uint64_t));
+        };
+    } else {
+        mask = mask_bits_section(d.rows, threads,
+                                 [&m](uint64_t begin, uint64_t end, uint8_t *buffer) { bit_vector_bytes(m.sa_transformed_mask, begin, end, buffer); });
+    }
     write_index_file(
         path, d,
         [&](uint64_t begin, uint64_t end, uint8_t *buffer) {
@@ -590,7 +633,7 @@ inline description save_mbwt(const mbwt &m, int k, const std::string &preset, la
                 buffer[b - begin] = packed;
             }
         },
-        [&](uint64_t begin, uint64_t end, uint8_t *buffer) { bit_vector_bytes(m.sa_transformed_mask, begin, end, buffer); }, threads);
+        mask, threads);
     return d;
 }
 
@@ -618,13 +661,14 @@ inline void save(const index &ix, const std::string &path, unsigned threads = 1,
     if (recommended != nullptr) d.recommended = *recommended;
     write_index_file(
         path, d, [&](uint64_t begin, uint64_t end, uint8_t *buffer) { ix.bwt.get_packed(begin, buffer, end - begin); },
-        [&](uint64_t begin, uint64_t end, uint8_t *buffer) {
-            for (uint64_t b = begin; b < end; ++b) {
-                uint8_t byte = 0;
-                for (uint64_t i = 8 * b; i < std::min<uint64_t>(8 * b + 8, ix.size); ++i) byte |= (uint8_t)ix.mask_get(i) << (i & 7);
-                buffer[b - begin] = byte;
-            }
-        },
+        mask_bits_section(ix.size, threads,
+                          [&ix](uint64_t begin, uint64_t end, uint8_t *buffer) {
+                              for (uint64_t b = begin; b < end; ++b) {
+                                  uint8_t byte = 0;
+                                  for (uint64_t i = 8 * b; i < std::min<uint64_t>(8 * b + 8, ix.size); ++i) byte |= (uint8_t)ix.mask_get(i) << (i & 7);
+                                  buffer[b - begin] = byte;
+                              }
+                          }),
         threads);
 }
 
@@ -736,10 +780,63 @@ inline description read_description(const file::reader &in) {
         if (parse_mask_name(recommended.substr(comma + 1), kind)) d.recommended.mask = (int)kind;
     }
     if (d.strands != 1 && d.strands != 2) throw std::invalid_argument("file " + in.path() + " has an unsupported number of strands");
-    if (meta.get("mask_order", "sa") != "sa") {
+    d.mask_order = meta.get("mask_order", "sa");
+    if (d.mask_order != "sa" && d.mask_order != "text") {
         throw std::invalid_argument("file " + in.path() + " stores its mask in an order that this version of FMSI does not know");
     }
     return d;
+}
+
+/// The mask of a file that stores it along the superstring (text_mask.h), permuted into the order of the suffix
+/// array by walks over the BWT, which must be loaded: into the plain mask directly, or into bits that the packed
+/// mask then replaces chunk by chunk.
+inline void load_text_mask(index &ix, const file::reader &in, const description &d, unsigned threads) {
+    const file::section_entry &mask = in.get("MASK"), &sampled = in.get("SAMPLES");
+    const uint64_t characters = mask.items;
+    if (sampled.encoding != ENCODING_SAMPLES || (d.strands == 2 ? 2 * characters + 2 : characters + 1) != d.rows) {
+        throw std::invalid_argument("file " + in.path() + " stores its mask in a form that this version of FMSI does not know");
+    }
+    const std::string runs = in.read_all(mask), stored = in.read_all(sampled);
+    text_samples samples;
+    uint64_t count = 0;
+    if (stored.size() < 16) throw std::invalid_argument("file " + in.path() + " is damaged");
+    memcpy(&samples.step, stored.data(), 8);
+    memcpy(&count, stored.data() + 8, 8);
+    if (count != (stored.size() - 16) / 8) throw std::invalid_argument("file " + in.path() + " is damaged");
+    samples.rows.resize(count);
+    memcpy(samples.rows.data(), stored.data() + 16, 8 * count);
+    for (uint64_t row : samples.rows) {
+        if (row >= d.rows) throw std::invalid_argument("file " + in.path() + " is damaged");
+    }
+    const run_mask along_text(reinterpret_cast<const uint8_t *>(runs.data()), runs.size(), characters, samples.step);
+
+    auto permute = [&](auto set, auto prefetch) {
+        ix.bwt.with_ranks([&](const auto &ranks) {
+            permute_text_mask(ranks, ix.counts, ix.dollar_position, ix.dollar_position2, ix.strands, ix.k, along_text, samples, threads, set, prefetch);
+        });
+    };
+    if (ix.mask_type == mask_kind::plain) {
+        ix.mask = bit_rank(d.rows);
+        permute([&](uint64_t row) { ix.mask.set_atomic(row); }, [&](uint64_t row) { ix.mask.prefetch_write(row); });
+        ix.mask.finalize(threads);
+        return;
+    }
+    chunked_bits bits(d.rows);
+    permute([&](uint64_t row) { bits.set_atomic(row); }, [&](uint64_t row) { bits.prefetch(row); });
+    if (ix.mask_type == mask_kind::packed) {
+        // The bits are passed twice; the second time they are given back as the packed mask grows.
+        int passes = 0;
+        ix.mask_packed.build_stream(d.rows, d.mask_ones, [&](auto sink) { bits.pass(sink, ++passes == 2); });
+    } else {
+        sdsl::bit_vector plain(d.rows, 0);
+        uint64_t first = 0;
+        bits.pass([&](uint64_t word, unsigned bit_count) {
+            plain.set_int(first, word, bit_count);
+            first += bit_count;
+        }, true);
+        ix.mask_rrr = sdsl::rrr_vector<RRR_BLOCK_SIZE>(plain);
+        ix.mask_rrr_rank = sdsl::rank_support_rrr<1, RRR_BLOCK_SIZE>(&ix.mask_rrr);
+    }
 }
 
 /// Load an index in the given layout (by default the one the file recommends). The BWT is read into its blocks
@@ -752,7 +849,7 @@ inline void load(index &ix, const std::string &path, unsigned threads = 1, layou
         return;
     }
     file::reader in(path);
-    in.check_known({"META", "BWT", "MASK"});
+    in.check_known({"META", "BWT", "MASK", "SAMPLES"});
     const description d = read_description(in);
     ix.k = d.k;
     ix.strands = d.strands;
@@ -778,10 +875,11 @@ inline void load(index &ix, const std::string &path, unsigned threads = 1, layou
     ix.bwt.finalize(threads);
 
     const file::section_entry &mask = in.get("MASK");
-    if (mask.encoding != ENCODING_MASK_SA_BITS || mask.items != d.rows || mask.raw_bytes != (d.rows + 7) / 8) {
+    if (mask.encoding == ENCODING_MASK_TEXT_RUNS) {
+        load_text_mask(ix, in, d, threads);
+    } else if (mask.encoding != ENCODING_MASK_SA_BITS || mask.items != d.rows || mask.raw_bytes != (d.rows + 7) / 8) {
         throw std::invalid_argument("file " + path + " stores its mask in a form that this version of FMSI does not know");
-    }
-    if (ix.mask_type == mask_kind::plain) {
+    } else if (ix.mask_type == mask_kind::plain) {
         ix.mask = bit_rank(d.rows);
         in.read(mask, threads, [&](uint64_t offset, const uint8_t *data, size_t bytes) {
             for_each_word(offset, data, bytes, d.rows, [&](uint64_t first, uint64_t word, unsigned count) { ix.mask.set_bits(first, word, count); });
@@ -849,6 +947,25 @@ inline void load_klcp(index &ix, const std::string &path, unsigned threads = 1) 
     in.read(bits, threads, [&](uint64_t offset, const uint8_t *data, size_t bytes) {
         for_each_word(offset, data, bytes, ix.size, [&](uint64_t first, uint64_t word, unsigned count) { ix.klcp.set_int(first, word, count); });
     });
+}
+
+/// The masked superstring of an index: its characters, in upper case where the mask is set. One walk over the
+/// BWT from the end of the superstring to its start (a step per character, each a cache miss: about 0.1 s per
+/// million characters of a large index).
+inline std::string export_masked_superstring(const index &ix) {
+    const uint64_t n = ix.strands == 2 ? (ix.size - 2) / 2 : ix.size - 1;
+    std::string superstring(n, 'A');
+    ix.bwt.with_ranks([&](const auto &ranks) {
+        // The suffix after the last character of the superstring: the empty one, or that of the separator, which
+        // is the second smallest one in an index of both strands.
+        uint64_t row = ix.strands == 2 ? 1 : 0;
+        for (uint64_t p = n; p-- > 0;) {
+            const uint8_t c = ranks[row];
+            row = ix.counts[c] + ranks.rank_inlined(row, c) - (c == 0 ? dollars_before(ix, row) : 0);
+            superstring[p] = (ix.mask_get(row) ? "ACGT" : "acgt")[c];
+        }
+    });
+    return superstring;
 }
 
 /// The file of an index given as the file itself, or as the name without its extension (a prefix, as the
