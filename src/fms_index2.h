@@ -870,6 +870,10 @@ inline unsigned default_prefix_length(const index &ix) {
     return length;
 }
 
+/// Indexes of fewer rows than this get a table of 32-bit integers. A variable, so that tests reach the table of
+/// 64-bit integers with small indexes.
+inline uint64_t prefix_table_32bit_limit = (uint64_t)1 << 32;
+
 /// Tabulate the SA intervals of all patterns of the given length. An entry is indexed by the
 /// characters in the order of the backward search, the first one being the most significant.
 void build_prefix_table(index &ix, unsigned length) {
@@ -895,7 +899,7 @@ void build_prefix_table(index &ix, unsigned length) {
         }
         table = std::move(current);
     };
-    if (ix.size < ((uint64_t)1 << 32)) {
+    if (ix.size < prefix_table_32bit_limit) {
         build(ix.prefix_table32);
     } else {
         build(ix.prefix_table64);

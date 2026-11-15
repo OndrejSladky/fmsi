@@ -1,4 +1,4 @@
-.PHONY: all clean 
+.PHONY: all clean example
 CXX=									g++
 ARCH?=								native
 CXXFLAGS=							-g -Wall -Wno-unused-function -std=c++17 -O3 -march=$(ARCH) -pthread
@@ -31,6 +31,12 @@ $(PROG): $(wildcard *.cpp *.c *.h) $(LIBSAIS) ./include/sdsl/suffix_arrays.hpp v
 	./create-version.sh
 	$(CXX) $(INCLUDES) $(CXXFLAGS) QSufSort.c main.cpp $(LIBSAIS) -o $@ $(LIBS) $(OPENMP_LIBS)
 
+# The example of the C++ API (fmsi_api.h).
+example: ../fmsi-example
+
+../fmsi-example: example.cpp $(wildcard *.h) $(LIBSAIS) ./include/sdsl/suffix_arrays.hpp $(OPENMP_SETTING)
+	$(CXX) $(INCLUDES) $(CXXFLAGS) QSufSort.c example.cpp $(LIBSAIS) -o $@ $(LIBS) $(OPENMP_LIBS)
+
 libsais/%.o: libsais/%.c libsais/libsais.h libsais/libsais64.h openmp.mk $(OPENMP_SETTING)
 	$(CC) $(CFLAGS) $(OPENMP_CFLAGS) -c $< -o $@
 
@@ -39,7 +45,7 @@ version.h: version
 
 
 clean:
-	rm -f $(PROG)
+	rm -f $(PROG) ../fmsi-example
 	rm -f version.h
 	rm -f $(LIBSAIS)
 	$(MAKE) -C sdsl-lite/build/ clean

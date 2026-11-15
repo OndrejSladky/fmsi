@@ -1061,4 +1061,52 @@ TEST(RANK2, PACKED_SYMBOLS_IN_PIECES) {
     }
 }
 
+/// The code for texts beyond 2^31 characters and indexes beyond 2^32 rows (suffix arrays and tables of 64-bit
+/// integers), reached with short texts by lowering the limits: the same MBWT, the same answers.
+TEST(FMS_INDEX2, WIDE_INTEGERS) {
+    std::mt19937_64 rng(12);
+    for (int round = 0; round < 12; ++round) {
+        size_t k = std::vector<size_t>{5, 13, 31, 33}[round % 4];
+        std::string ms = random_mask(rng, random_superstring(rng, k + 200 + rng() % 30000), k, round % 2);
+        queries q = make_queries(rng, ms, k);
+        const bool both = round % 3 == 2;
+        auto compute = [&]() {
+            std::string copy = ms;
+            return both ? doubled::compute_mbwt(copy, k, true, 1 + round % 3)
+                        : k <= 32 ? compute_mbwt<uint64_t>(copy, k, true, false, 1 + round % 3)
+                                  : compute_mbwt<__uint128_t>(copy, k, true, false, 1 + round % 3);
+        };
+        mbwt narrow = compute();
+        suffix_array_32bit_limit = 0;
+        mbwt wide = compute();
+        suffix_array_32bit_limit = (size_t)INT32_MAX;
+        ASSERT_EQ(narrow.bwt, wide.bwt);
+        ASSERT_EQ(narrow.sa_transformed_mask, wide.sa_transformed_mask);
+        ASSERT_EQ(narrow.klcp, wide.klcp);
+        ASSERT_EQ(narrow.dollar_position, wide.dollar_position);
+        ASSERT_EQ(narrow.dollar_position2, wide.dollar_position2);
+
+        fmsi2::index a, b;
+        fmsi2::build(a, narrow, k, fmsi2::mask_kind::plain);
+        fmsi2::build(b, wide, k, fmsi2::mask_kind::plain);
+        for (unsigned table : {0, 3, 7}) {
+            fmsi2::build_prefix_table(a, table);
+            fmsi2::prefix_table_32bit_limit = 0;
+            fmsi2::build_prefix_table(b, table);
+            fmsi2::prefix_table_32bit_limit = (uint64_t)1 << 32;
+            ASSERT_TRUE(table == 0 || (!a.prefix_table32.empty() && a.prefix_table64.empty()));
+            ASSERT_TRUE(table == 0 || (b.prefix_table32.empty() && !b.prefix_table64.empty()));
+            fmsi2::lookup_stats stats;
+            std::vector<int64_t> want(q.sequences.size(), -1), got(q.sequences.size(), -1), streamed(q.sequences.size(), -1);
+            fmsi2::lookup_batch<true, int64_t>(a, q.sequences.data(), q.offsets.data(), q.offsets.size(), want.data(), 16, stats);
+            fmsi2::lookup_batch<true, int64_t>(b, q.sequences.data(), q.offsets.data(), q.offsets.size(), got.data(), 16, stats);
+            ASSERT_EQ(want, got) << "round " << round << " table " << table;
+            std::vector<int8_t> member(q.sequences.size(), 0), member_streamed(q.sequences.size(), 0);
+            fmsi2::lookup_batch<false, int8_t>(b, q.sequences.data(), q.offsets.data(), q.offsets.size(), member.data(), 16, stats);
+            fmsi2::lookup_streaming<false, int8_t>(b, q.sequences.data(), q.segments.data(), q.segments.size(), member_streamed.data(), 8, stats);
+            ASSERT_EQ(member, member_streamed) << "round " << round << " table " << table;
+        }
+    }
+}
+
 } // namespace

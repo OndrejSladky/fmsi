@@ -251,7 +251,7 @@ mbwt compute_mbwt(std::string ms, int k, bool use_klcp, unsigned threads = 1) {
     std::string().swap(ms);
     build_phases.lap("encode");
     mbwt m = empty_mbwt(t, use_klcp);
-    if (t.length() < (size_t)INT32_MAX) {
+    if (t.length() < suffix_array_32bit_limit) {
         auto sa = suffix_array<int32_t>(t.codes.data(), t.length(), threads);
         build_phases.lap("suffix_array");
         set_mask(t, threads);

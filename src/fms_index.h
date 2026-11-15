@@ -453,6 +453,10 @@ struct mbwt {
     size_t dollar_position2 = NO_ROW;
 };
 
+/// Texts of fewer characters than this get a suffix array of 32-bit integers (5 bytes per character), longer
+/// ones of 64-bit integers (9 bytes per character). A variable, so that tests reach the 64-bit code with short texts.
+inline size_t suffix_array_32bit_limit = (size_t)INT32_MAX;
+
 /// Whether the constructions of the MBWT also fill mbwt::same_kmer (one more bit per row while constructing).
 inline bool mbwt_with_same_kmer = false;
 
@@ -564,7 +568,7 @@ mbwt compute_mbwt(std::string &ms, int k, bool use_klcp, bool use_qsufsort = fal
     if (use_qsufsort) {
         auto sa = suffix_array_qsufsort(ms);
         return mbwt_from_suffix_array<T, qsint_t>(ms, sa.data(), k, use_klcp, threads);
-    } else if (ms.size() < (size_t)INT32_MAX) {
+    } else if (ms.size() < suffix_array_32bit_limit) {
         auto sa = suffix_array_libsais<int32_t>(ms, threads);
         return mbwt_from_suffix_array<T, int32_t>(ms, sa.data(), k, use_klcp, threads);
     } else {
