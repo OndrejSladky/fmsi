@@ -92,12 +92,7 @@ class Index {
         if (access) fmsi2::build_access_support(*ix_);
     }
 
-    static bool valid(const char *kmer, size_t k) {
-        for (size_t i = 0; i < k; ++i) {
-            if (nucleotideToInt[(uint8_t)kmer[i]] == 4) return false;
-        }
-        return true;
-    }
+    static bool valid(const char *kmer, size_t k) { return fmsi2::valid_run(kmer, k) == k; }
 
     /// The k-mers of a sequence: results[i] for the k-mer at i (absent if it has a character other than ACGT).
     template <bool hashes, typename out_t>
@@ -108,15 +103,16 @@ class Index {
         std::vector<out_t> results(length, hashes ? -1 : 0);
         std::vector<uint32_t> offsets;
         std::vector<fmsi2::segment> segments;
-        size_t valid_run = 0;
-        for (size_t i = 0; i <= length; ++i) {
-            if (i < length && nucleotideToInt[(uint8_t)sequence[i]] != 4) {
-                ++valid_run;
-                if (!streaming && valid_run >= k) offsets.push_back((uint32_t)(i + 1 - k));
-            } else {
-                if (streaming && valid_run >= k) segments.push_back({(uint32_t)(i - valid_run), (uint32_t)valid_run});
-                valid_run = 0;
+        for (size_t i = 0; i < length;) {
+            const size_t run = fmsi2::valid_run(sequence.data() + i, length - i);
+            if (run >= k) {
+                if (streaming) {
+                    segments.push_back({(uint32_t)i, (uint32_t)run});
+                } else {
+                    for (size_t j = 0; j + k <= run; ++j) offsets.push_back((uint32_t)(i + j));
+                }
             }
+            i += run + 1;
         }
         fmsi2::lookup_stats stats;
         if (streaming) {

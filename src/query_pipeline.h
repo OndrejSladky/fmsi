@@ -356,15 +356,17 @@ struct block_worker {
         offsets.clear();
         segments.clear();
         for (const auto &r : b.records) {
-            size_t valid = 0;
-            for (size_t i = 0; i <= r.length; ++i) {
-                if (i < r.length && nucleotideToInt[(uint8_t)sequences[r.offset + i]] != 4) {
-                    ++valid;
-                    if (!streaming && valid >= k) offsets.push_back(r.offset + i + 1 - k);
-                } else {
-                    if (streaming && valid >= k) segments.push_back({(uint32_t)(r.offset + i - valid), (uint32_t)valid});
-                    valid = 0;
+            for (size_t i = 0; i < r.length;) {
+                // A stretch of nucleotides and the character that ends it.
+                const size_t run = valid_run(sequences + r.offset + i, r.length - i);
+                if (run >= k) {
+                    if (streaming) {
+                        segments.push_back({(uint32_t)(r.offset + i), (uint32_t)run});
+                    } else {
+                        for (size_t j = 0; j + k <= run; ++j) offsets.push_back((uint32_t)(r.offset + i + j));
+                    }
                 }
+                i += run + 1;
             }
         }
         // K-mers with invalid characters are reported as absent.

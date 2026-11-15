@@ -139,6 +139,55 @@ inline uint64_t low_bits(int bits) {
     return (1ULL << bits) - 1;
 }
 
+/// The number of characters at the start of [s] (of length n) that are nucleotides (ACGT in either case): 16
+/// characters at a time where the processor has vectors, the last ones by a vector that ends with the string.
+/// The queries are scanned by it for the stretches that can hold k-mers.
+inline size_t valid_run(const char *s, size_t n) {
+    // The nucleotides among the characters 64 to 127: A, C, G, T and a, c, g, t.
+    const uint64_t nucleotides = (1ULL << 1) | (1ULL << 3) | (1ULL << 7) | (1ULL << 20) | (1ULL << 33) | (1ULL << 35) | (1ULL << 39) | (1ULL << 52);
+    size_t i = 0;
+#if defined(FMSI2_NEON) || defined(FMSI2_NEON_MASK)
+    const uint8x16_t lower = vdupq_n_u8(0x20), a = vdupq_n_u8('a'), c = vdupq_n_u8('c'), g = vdupq_n_u8('g'), t = vdupq_n_u8('t');
+    // Four bits per character, set for the characters that are not nucleotides.
+    auto invalid = [&](const char *p) {
+        const uint8x16_t x = vorrq_u8(vld1q_u8(reinterpret_cast<const uint8_t *>(p)), lower);
+        const uint8x16_t valid = vorrq_u8(vorrq_u8(vceqq_u8(x, a), vceqq_u8(x, c)), vorrq_u8(vceqq_u8(x, g), vceqq_u8(x, t)));
+        return ~vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(valid), 4)), 0);
+    };
+    for (; i + 16 <= n; i += 16) {
+        const uint64_t mask = invalid(s + i);
+        if (mask != 0) return i + (size_t)__builtin_ctzll(mask) / 4;
+    }
+    if (i < n && n >= 16) {
+        // The last 16 characters, of which the first ones were checked.
+        const uint64_t mask = invalid(s + n - 16) >> (4 * (i + 16 - n));
+        return mask != 0 ? i + (size_t)__builtin_ctzll(mask) / 4 : n;
+    }
+#elif defined(FMSI2_SSE)
+    const __m128i lower = _mm_set1_epi8(0x20), a = _mm_set1_epi8('a'), c = _mm_set1_epi8('c'), g = _mm_set1_epi8('g'), t = _mm_set1_epi8('t');
+    // One bit per character, set for the characters that are not nucleotides.
+    auto invalid = [&](const char *p) {
+        const __m128i x = _mm_or_si128(_mm_loadu_si128(reinterpret_cast<const __m128i *>(p)), lower);
+        const __m128i valid = _mm_or_si128(_mm_or_si128(_mm_cmpeq_epi8(x, a), _mm_cmpeq_epi8(x, c)),
+                                           _mm_or_si128(_mm_cmpeq_epi8(x, g), _mm_cmpeq_epi8(x, t)));
+        return ~(unsigned)_mm_movemask_epi8(valid) & 0xFFFFu;
+    };
+    for (; i + 16 <= n; i += 16) {
+        const unsigned mask = invalid(s + i);
+        if (mask != 0) return i + (size_t)__builtin_ctz(mask);
+    }
+    if (i < n && n >= 16) {
+        const unsigned mask = invalid(s + n - 16) >> (i + 16 - n);
+        return mask != 0 ? i + (size_t)__builtin_ctz(mask) : n;
+    }
+#endif
+    for (; i < n; ++i) {
+        const uint8_t x = (uint8_t)s[i];
+        if (x < 64 || x >= 128 || !((nucleotides >> (x - 64)) & 1)) return i;
+    }
+    return n;
+}
+
 /// The low [bits] bits set, for bits in (-inf, +inf) clamped to [0, 64], without a branch.
 static inline __attribute__((always_inline)) uint64_t low_bits_branchless(int64_t bits) {
     bits = bits < 0 ? 0 : bits;

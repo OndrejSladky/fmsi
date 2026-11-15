@@ -1229,4 +1229,26 @@ TEST(TEXT_MASK, FILE) {
     std::filesystem::remove(path + ".sa.fmsi");
 }
 
+/// The scan for stretches of nucleotides against the table of the characters.
+TEST(RANK2, VALID_RUN) {
+    std::mt19937_64 rng(15);
+    for (int c = 0; c < 256; ++c) {
+        const char s[2] = {(char)c, 'A'};
+        ASSERT_EQ(fmsi2::valid_run(s, 2), nucleotideToInt[c] != 4 ? 2u : 0u) << c;
+    }
+    for (int round = 0; round < 2000; ++round) {
+        const size_t n = rng() % 100;
+        std::string s(n, 'A');
+        for (auto &c : s) c = rng() % 20 == 0 ? (char)(rng() % 256) : "ACGTacgt"[rng() % 8];
+        size_t want = 0;
+        while (want < n && nucleotideToInt[(uint8_t)s[want]] != 4) ++want;
+        // At any offset of the string, so that the vectors start anywhere.
+        const size_t from = n ? rng() % n : 0;
+        size_t want_from = from;
+        while (want_from < n && nucleotideToInt[(uint8_t)s[want_from]] != 4) ++want_from;
+        ASSERT_EQ(fmsi2::valid_run(s.data(), n), want) << s;
+        ASSERT_EQ(fmsi2::valid_run(s.data() + from, n - from), want_from - from) << s;
+    }
+}
+
 } // namespace
