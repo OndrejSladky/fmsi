@@ -470,6 +470,11 @@ def test_reference(fails, fmsi, ref, queries, directory, tag, quick, legacy_bina
         copy = os.path.join(directory, "%s.%s.fa" % (tag, label))
         shutil.copy(fasta, copy)
         code, _, err = run(legacy + ["index", "-k", str(k), copy])
+        if k == 1 and code != 0:
+            # FMSI 0.4 crashes for k = 1 while it constructs its kLCP array (its `index` always does); the
+            # released baseline is left as it is, and the case is counted, not failed.
+            fails.check("legacy-k1-crash-known", True, "")
+            continue
         if not fails.check("legacy-build", code == 0, "%s %s: %s" % (tag, label, err.strip()[-200:])):
             continue
         plain = [(name, sequence) for name, sequence in queries
